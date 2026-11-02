@@ -24,6 +24,14 @@ public static class Program
 
         try
         {
+            if (!File.Exists(input))
+            {
+                Console.Error.WriteLine($"Ошибка: не найден входной файл {Path.GetFullPath(input)}.");
+                Console.Error.WriteLine("Укажите его ключом --input <путь к input_mass.json> или положите в папку data/.");
+                return 2;
+            }
+            if (!File.Exists(settings))
+                Console.WriteLine($"Файл настроек {settings} не найден — используются параметры по умолчанию.");
             var p = Parameters.Load(settings);
             var data = InputData.Load(input);
             Console.WriteLine($"Целей: {data.Wells.Count}, исходных вариантов: {data.Variants.Count}, фактических скважин: {data.RealWells.Count}");
