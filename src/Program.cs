@@ -37,7 +37,7 @@ public static class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
         string input = Arg(args, "--input") ?? Path.Combine(AppContext.BaseDirectory, "data", "input_mass.json");
-        string mapPath = Arg(args, "--map") ?? Path.Combine(AppContext.BaseDirectory, "data", "terrain_map.asc");
+        string mapPath = Arg(args, "--map");
         string settings = Arg(args, "--settings") ?? Path.Combine(AppContext.BaseDirectory, "settings.json");
         string outDir = Arg(args, "--out") ?? "results";
         Directory.CreateDirectory(outDir);
@@ -58,14 +58,43 @@ public static class Program
             Console.WriteLine($"Целей: {data.Wells.Count}, исходных вариантов: {data.Variants.Count}, фактических скважин: {data.RealWells.Count}");
             Console.WriteLine($"R1 = {p.R1:F0} м, R2 = {p.R2:F0} м (темпы {p.Dls1} и {p.Dls2} °/{p.DlsBaseLength} м)");
 
-            TerrainMap map;
-            if (File.Exists(mapPath)) { map = TerrainMap.LoadAsc(mapPath); }
+            // Карта желательности: ключ --map или параметр TerrainMapFile в settings.json.
+            // Если карта не задана или файл не найден, вся территория считается суходолом (DefaultTerrainCode).
+            if (string.IsNullOrWhiteSpace(mapPath) && !string.IsNullOrWhiteSpace(p.TerrainMapFile))
+            {
+                mapPath = p.TerrainMapFile;
+                if (!Path.IsPathRooted(mapPath))
+                {
+                    string baseDir = Path.GetDirectoryName(Path.GetFullPath(settings)) ?? AppContext.BaseDirectory;
+                    mapPath = Path.Combine(baseDir, mapPath);
+                }
+            }
+            TerrainMap map; string mapName;
+            if (!string.IsNullOrWhiteSpace(mapPath) && File.Exists(mapPath))
+            {
+                map = TerrainMap.LoadAsc(mapPath);
+                mapName = Path.GetFileName(mapPath);
+                Console.WriteLine($"Карта желательности: {mapPath} ({map.NCols}×{map.NRows}, ячейка {map.CellSize} м)");
+            }
+            else if (args.Contains("--synthetic-map"))
+            {
+                map = TerrainMap.Synthetic(data.Wells);
+                string synth = Path.Combine(outDir, "terrain_map_synthetic.asc");
+                map.SaveAsc(synth);
+                mapName = "синтетическая (" + Path.GetFileName(synth) + ")";
+                Console.WriteLine("Построена синтетическая карта желательности: " + synth);
+            }
             else
             {
-                Console.WriteLine("Карта желательности не задана — построена синтетическая карта (сохранена в terrain_map_synthetic.asc)");
-                map = TerrainMap.Synthetic(data.Wells);
-                mapPath = Path.Combine(outDir, "terrain_map_synthetic.asc");
-                map.SaveAsc(mapPath);
+                if (!string.IsNullOrWhiteSpace(mapPath))
+                    Console.WriteLine($"Внимание: файл карты {mapPath} не найден.");
+                var dry = p.Terrain.FirstOrDefault(t => t.Code == p.DefaultTerrainCode);
+                string dryName = dry?.Name ?? ("класс " + p.DefaultTerrainCode);
+                double margin = p.MaxOffset * p.SoftRadiusFactor + p.PadDiagonal(p.MaxPadCapacity) + 500;
+                map = TerrainMap.Uniform(data.Wells, p.DefaultTerrainCode, margin);
+                mapName = $"не задана — вся территория: {dryName.ToLowerInvariant()}";
+                Console.WriteLine($"Карта желательности не задана — вся территория считается: {dryName.ToLowerInvariant()} " +
+                                  $"(высота отсыпки {(dry?.FillHeight ?? 0):0.0} м, запретных зон нет)");
             }
             map.ForbiddenCode = p.ForbiddenCode;
 
@@ -160,7 +189,7 @@ public static class Program
             Reporting.PrintSummary(results, best);
             foreach (var x in infeasible) Console.WriteLine($"{x.Name}: нет решения — {x.Reason}");
             Reporting.WriteCsv(outDir, results, p, infeasible);
-            string json = Reporting.BuildJson(results, best, data, map, p, Path.GetFileName(input), Path.GetFileName(mapPath), infeasible);
+            string json = Reporting.BuildJson(results, best, data, map, p, Path.GetFileName(input), mapName, infeasible);
             File.WriteAllText(Path.Combine(outDir, "results.json"), json, new UTF8Encoding(false));
             Reporting.WriteHtml(Path.Combine(outDir, "report.html"), json);
             Console.WriteLine(Reporting.PlotlyEmbedded

@@ -134,6 +134,26 @@ public sealed class TerrainMap
         return map;
     }
 
+    /// <summary>
+    /// Однородная карта (используется, когда карта желательности не задана): вся территория вокруг целей
+    /// с запасом margin получает один класс, запретных зон нет.
+    /// </summary>
+    public static TerrainMap Uniform(IReadOnlyList<WellTarget> wells, int code, double margin, double cell = 100)
+    {
+        double minE = wells.Min(w => Math.Min(w.T1.E, w.T3.E)) - margin, maxE = wells.Max(w => Math.Max(w.T1.E, w.T3.E)) + margin;
+        double minN = wells.Min(w => Math.Min(w.T1.N, w.T3.N)) - margin, maxN = wells.Max(w => Math.Max(w.T1.N, w.T3.N)) + margin;
+        double x0 = Math.Floor(minE / 1000) * 1000, y0 = Math.Floor(minN / 1000) * 1000;
+        double x1 = Math.Ceiling(maxE / 1000) * 1000, y1 = Math.Ceiling(maxN / 1000) * 1000;
+        var map = new TerrainMap
+        {
+            NCols = (int)Math.Round((x1 - x0) / cell), NRows = (int)Math.Round((y1 - y0) / cell),
+            XLL = x0, YLL = y0, CellSize = cell, ForbiddenCode = 9,
+        };
+        map._grid = new short[map.NCols * map.NRows];
+        Array.Fill(map._grid, (short)code);
+        return map;
+    }
+
     private static double Gauss(Random r)
     {
         double u1 = 1.0 - r.NextDouble(), u2 = r.NextDouble();

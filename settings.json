@@ -45,6 +45,8 @@
     { "Code": 3, "Name": "Водоём",  "FillHeight": 4.0 }
   ],
   "ForbiddenCode": 9,
+  "TerrainMapFile": "",
+  "DefaultTerrainCode": 1,
   "ForbiddenBuffer": 0,
   "ExtraPadGap": 0,
 

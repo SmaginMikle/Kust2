@@ -76,6 +76,10 @@ public sealed class Parameters
         new TerrainClass { Code = 3, Name = "Водоём", FillHeight = 4.0 },
     };
     public int ForbiddenCode { get; set; } = 9;
+    /// <summary>Файл карты желательности (.asc); пусто — карта не задана, вся территория считается DefaultTerrainCode.</summary>
+    public string TerrainMapFile { get; set; } = "";
+    /// <summary>Класс местности при отсутствии карты (1 — суходол).</summary>
+    public int DefaultTerrainCode { get; set; } = 1;
     public double ForbiddenBuffer { get; set; } = 0;       // Мин. расстояние до запрещённой зоны, м
     public double ExtraPadGap { get; set; } = 0;           // Доп. расстояние между кустами, м
 
