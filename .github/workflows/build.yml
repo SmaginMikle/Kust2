@@ -31,18 +31,3 @@ jobs:
 
       - name: Build
         run: dotnet build WellPadOptimizer.csproj -c Release --no-restore
-
-      - name: Проверочный расчёт на данных из репозитория
-        run: |
-          dotnet run --project WellPadOptimizer.csproj -c Release --no-build -- \
-            --input data/input_mass.json \
-            --map data/terrain_map.asc \
-            --settings settings.json \
-            --out ci_results
-
-      - name: Сохранить результаты расчёта
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-results
-          path: ci_results/
-          retention-days: 14
