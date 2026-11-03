@@ -17,17 +17,70 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
+      # Проект может лежать как в корне репозитория, так и во вложенной папке
+      - name: Найти проект
+        id: proj
+        shell: bash
+        run: |
+          PROJ=$(git ls-files '*.csproj' | head -n 1)
+          if [ -z "$PROJ" ]; then
+            echo "::error::В репозитории не найден файл .csproj. Загрузите WellPadOptimizer.csproj и папку src/."
+            git ls-files | head -n 50
+            exit 1
+          fi
+          DIR=$(dirname "$PROJ")
+          echo "Проект: $PROJ"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "file=$(basename "$PROJ")" >> "$GITHUB_OUTPUT"
+          for f in settings.json report_template.html data/input_mass.json data/terrain_map.asc; do
+            if [ -f "$DIR/$f" ]; then echo "  есть: $f"; else echo "::warning::нет файла $DIR/$f"; fi
+          done
+
+      - name: Скачать Plotly для встраивания в отчёт
+        working-directory: ${{ steps.proj.outputs.dir }}
+        shell: bash
+        run: |
+          mkdir -p assets
+          if [ ! -s assets/plotly.min.js ]; then
+            curl -fsSL --retry 3 -o assets/plotly.min.js https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js \
+              || curl -fsSL --retry 3 -o assets/plotly.min.js https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js
+          fi
+          ls -l assets/plotly.min.js
+          test $(wc -c < assets/plotly.min.js) -gt 1000000
+
       - name: Restore
-        run: dotnet restore WellPadOptimizer.csproj
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: dotnet restore ${{ steps.proj.outputs.file }}
 
       - name: Build
-        run: dotnet build WellPadOptimizer.csproj -c Release --no-restore
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: dotnet build ${{ steps.proj.outputs.file }} -c Release --no-restore
+
+      - name: Проверочный расчёт
+        working-directory: ${{ steps.proj.outputs.dir }}
+        shell: bash
+        run: |
+          if [ ! -f data/input_mass.json ]; then
+            echo "::warning::data/input_mass.json не найден — расчёт пропущен"
+            exit 0
+          fi
+          dotnet run --project ${{ steps.proj.outputs.file }} -c Release --no-build -- \
+            --input data/input_mass.json --map data/terrain_map.asc --settings settings.json --out ci_results --no-pause
+
+      - name: Сохранить результаты расчёта
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-results
+          path: ${{ steps.proj.outputs.dir }}/ci_results/
+          if-no-files-found: ignore
+          retention-days: 14
