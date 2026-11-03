@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="report_template.html" LogicalName="report_template.html" />
+    <EmbeddedResource Include="assets\plotly.min.js" LogicalName="plotly.min.js" Condition="Exists('assets\plotly.min.js')" />
     <None Include="settings.json" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="data\**\*" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>

@@ -27,6 +27,14 @@ git push origin v1.0.0
 
 Запуск из релиза (Windows): `WellPadOptimizer.exe --input data\input_mass.json --out results`.
 
+## Окно программы и отчёт
+
+* После расчёта программа ждёт нажатия клавиши, чтобы можно было прочитать лог. Ключ `--no-pause` отключает ожидание
+  (в GitHub Actions оно отключается автоматически).
+* `report.html` использует библиотеку графиков Plotly. Сборки из GitHub (Actions и релизы) скачивают её в `assets/plotly.min.js`
+  и встраивают в программу — отчёт открывается без интернета. При локальной сборке положите `plotly.min.js`
+  в папку `assets/` перед сборкой или рядом с исполняемым файлом; иначе отчёт загружает Plotly из CDN.
+
 ## Входные данные
 
 * `input_mass.json` (формат rndrilling-v3). Цели берутся из `massiveDataVariants[].trajBuildRequest[]`:

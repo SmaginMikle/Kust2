@@ -193,6 +193,15 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
 (function () {
   const R = REPORT;
   if (!R) { document.querySelector('.wrap').insertAdjacentHTML('beforeend', '<p>Нет данных отчёта.</p>'); return; }
+  if (!window.Plotly) {
+    // библиотека графиков недоступна: показываем предупреждение, таблицы строятся без графиков
+    document.querySelector('header').insertAdjacentHTML('afterend',
+      '<p class="note" style="border:1px solid var(--critical);color:var(--critical);padding:10px 14px;border-radius:6px;margin:0">' +
+      'Не удалось загрузить библиотеку графиков Plotly, поэтому 3D, план и проекции не отображаются. ' +
+      'Положите файл plotly.min.js рядом с report.html или откройте отчёт на компьютере с доступом к интернету. ' +
+      'Сборка программы из релиза встраивает библиотеку в отчёт.</p>');
+    window.Plotly = { react: function () {} };
+  }
   const $ = (id) => document.getElementById(id);
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const fmt = (v, d = 1) => v == null || !isFinite(v) ? '—' : v.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d });

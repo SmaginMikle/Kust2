@@ -250,6 +250,37 @@ public static class Reporting
         return res;
     }
 
+    private const string PlotlyCdnTag = "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js\"></script>";
+    public static bool PlotlyEmbedded { get; private set; }
+
+    /// <summary>
+    /// Библиотека Plotly для отчёта. Порядок: встроенный ресурс сборки (assets/plotly.min.js, скачивается в CI),
+    /// файл plotly.min.js рядом с программой. Тогда скрипт вставляется в report.html целиком и отчёт работает
+    /// без интернета. Иначе — локальный plotly.min.js рядом с отчётом и цепочка CDN (jsDelivr, cdnjs, unpkg).
+    /// </summary>
+    private static string PlotlyScriptBlock(string reportDir)
+    {
+        string js = null;
+        var asm = Assembly.GetExecutingAssembly();
+        using (var s = asm.GetManifestResourceStream("plotly.min.js"))
+            if (s != null) using (var r = new StreamReader(s)) js = r.ReadToEnd();
+        if (js == null)
+        {
+            foreach (var f in new[] { Path.Combine(AppContext.BaseDirectory, "plotly.min.js"), Path.Combine(AppContext.BaseDirectory, "assets", "plotly.min.js") })
+                if (File.Exists(f)) { js = File.ReadAllText(f); break; }
+        }
+        if (js != null && js.Length > 100000)
+        {
+            PlotlyEmbedded = true;
+            return "<script>\n" + js.Replace("</script", "<\\/script") + "\n</script>";
+        }
+        PlotlyEmbedded = false;
+        return "<script src=\"plotly.min.js\"></script>\n" +
+               "<script>if(!window.Plotly)document.write('<script src=\"https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js\"><\\/script>');</script>\n" +
+               "<script>if(!window.Plotly)document.write('<script src=\"https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js\"><\\/script>');</script>\n" +
+               "<script>if(!window.Plotly)document.write('<script src=\"https://unpkg.com/plotly.js-dist-min@2.35.2/plotly.min.js\"><\\/script>');</script>";
+    }
+
     public static void WriteHtml(string path, string json)
     {
         string tpl;
@@ -266,6 +297,7 @@ public static class Reporting
         // защита от закрывающего тега внутри JSON
         json = json.Replace("</", "<\\/");
         string body = tpl.Replace("/*__REPORT_DATA__*/null", json);
+        body = body.Replace(PlotlyCdnTag, PlotlyScriptBlock(Path.GetDirectoryName(Path.GetFullPath(path))));
         // шаблон — фрагмент страницы; для автономного файла добавляем полноценный каркас документа
         string html = "<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n" +
                       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n" +

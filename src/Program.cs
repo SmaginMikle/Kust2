@@ -14,6 +14,27 @@ public static class Program
 {
     public static int Main(string[] args)
     {
+        int code = Run(args);
+        Pause(args, code);
+        return code;
+    }
+
+    /// <summary>
+    /// Окно не закрывается после расчёта: ждём нажатия клавиши.
+    /// Пауза отключается ключом --no-pause, при перенаправленном вводе и в CI (переменная CI=true).
+    /// </summary>
+    private static void Pause(string[] args, int code)
+    {
+        if (args.Contains("--no-pause") || Console.IsInputRedirected ||
+            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
+            return;
+        Console.WriteLine();
+        Console.WriteLine(code == 0 ? "Расчёт завершён. Нажмите любую клавишу для выхода…" : "Расчёт завершён с ошибкой. Нажмите любую клавишу для выхода…");
+        try { Console.ReadKey(true); } catch (InvalidOperationException) { Console.ReadLine(); }
+    }
+
+    private static int Run(string[] args)
+    {
         Console.OutputEncoding = Encoding.UTF8;
         string input = Arg(args, "--input") ?? Path.Combine(AppContext.BaseDirectory, "data", "input_mass.json");
         string mapPath = Arg(args, "--map") ?? Path.Combine(AppContext.BaseDirectory, "data", "terrain_map.asc");
@@ -142,6 +163,10 @@ public static class Program
             string json = Reporting.BuildJson(results, best, data, map, p, Path.GetFileName(input), Path.GetFileName(mapPath), infeasible);
             File.WriteAllText(Path.Combine(outDir, "results.json"), json, new UTF8Encoding(false));
             Reporting.WriteHtml(Path.Combine(outDir, "report.html"), json);
+            Console.WriteLine(Reporting.PlotlyEmbedded
+                ? "report.html: библиотека графиков встроена, отчёт открывается без интернета."
+                : "report.html: библиотека графиков не встроена — для графиков нужен доступ к cdn.jsdelivr.net / cdnjs.cloudflare.com / unpkg.com " +
+                  "или файл plotly.min.js рядом с report.html.");
             Console.WriteLine($"\nГотово за {sw.Elapsed.TotalSeconds:F1} с. Результаты: {Path.GetFullPath(outDir)} (report.html, summary.csv, pads.csv, wells.csv, trajectories/*.csv)");
             return 0;
         }
