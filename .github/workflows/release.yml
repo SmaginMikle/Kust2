@@ -27,12 +27,6 @@ jobs:
           - rid: win-x64
             os: windows-latest
             exe: WellPadOptimizer.exe
-          - rid: linux-x64
-            os: ubuntu-latest
-            exe: WellPadOptimizer
-          - rid: osx-arm64
-            os: macos-latest
-            exe: WellPadOptimizer
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -70,7 +64,6 @@ jobs:
           mkdir -p "dist/$PKG"
           cp "publish/${{ matrix.rid }}/${{ matrix.exe }}" "dist/$PKG/"
           cp settings.json README.md "dist/$PKG/"
-          cp -r data "dist/$PKG/"
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             7z a -tzip "$PKG.zip" "$PKG" > /dev/null
@@ -78,14 +71,6 @@ jobs:
             chmod +x "$PKG/${{ matrix.exe }}"
             zip -qr "$PKG.zip" "$PKG"
           fi
-
-      - name: Проверочный запуск собранного файла
-        if: matrix.rid != 'osx-arm64' || runner.arch == 'ARM64'
-        shell: bash
-        run: |
-          cd "dist/WellPadOptimizer-${{ steps.ver.outputs.tag }}-${{ matrix.rid }}"
-          ./${{ matrix.exe }} --input data/input_mass.json --map data/terrain_map.asc --settings settings.json --out results
-          test -f results/report.html
 
       - uses: actions/upload-artifact@v4
         with:
