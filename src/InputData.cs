@@ -12,6 +12,10 @@ public sealed class WellTarget
     public Vec3 T3 { get; init; }
     public double HorizontalLength => (T3 - T1).Length;
     public bool HasHorizontal => HorizontalLength > 1e-6;
+    /// <summary>Горизонтальный участок можно бурить с любого конца (в проектах КИН начало ГС выбирается расчётом).</summary>
+    public bool Reversible { get; init; }
+    /// <summary>Та же цель с переставленными T1 и T3.</summary>
+    public WellTarget Reversed() => new() { Index = Index, Name = Name, Uid = Uid, T1 = T3, T3 = T1, Reversible = Reversible };
     public string Key => $"{T1.N:F2}|{T1.E:F2}|{T3.N:F2}|{T3.E:F2}";
 }
 
@@ -29,6 +33,8 @@ public sealed class RealWell
 public sealed class InputVariant
 {
     public int Id { get; init; }
+    /// <summary>Название варианта (для проектов КИН — «Вариант КИН N»).</summary>
+    public string Name { get; init; }
     /// <summary>pad_id → список (индекс цели, устье N, устье E).</summary>
     public SortedDictionary<int, List<(int well, double n, double e)>> Pads { get; } = new();
 }
@@ -39,17 +45,27 @@ public sealed class InputData
     public List<RealWell> RealWells { get; } = new();
     public List<InputVariant> Variants { get; } = new();
     public int ProjectedCrs { get; private set; }
+    /// <summary>Формат источника: «rndrilling» (input_mass.json) или «project» (проект кустования КИН).</summary>
+    public string Format { get; private set; } = "rndrilling";
+    /// <summary>Встроенные в проект файлы (например, карта желательности .bin): имя → содержимое.</summary>
+    public Dictionary<string, byte[]> EmbeddedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Параметры расчёта, сохранённые в проекте (props), или null.</summary>
+    public JsonElement? ProjectProps { get; private set; }
+    public string ProjectTitle { get; private set; } = "";
 
     /// <summary>
     /// Чтение формата rndrilling-v3: massiveDataVariants[].trajBuildRequest[] с T1/T3 = [North, East, TVD].
     /// Набор целей берётся из первого варианта; остальные варианты сопоставляются по координатам T1/T3.
     /// </summary>
-    public static InputData Load(string path)
+    /// <summary>Загрузка входных данных: JSON (rndrilling или проект КИН), таблица Excel / CSV.</summary>
+    public static InputData Load(string path, Parameters p = null)
     {
-        var data = new InputData();
-        using var doc = JsonDocument.Parse(File.ReadAllBytes(path),
-            new JsonDocumentOptions { AllowTrailingCommas = true });
+        if (TableLoader.IsTable(path)) return TableLoader.Load(path, p ?? new Parameters());
+        using var fs = File.OpenRead(path);
+        using var doc = JsonDocument.Parse(fs, new JsonDocumentOptions { AllowTrailingCommas = true, MaxDepth = 256 });
         var root = doc.RootElement;
+        if (root.TryGetProperty("props", out _) && root.TryGetProperty("wrappers", out _)) return ProjectLoader.Load(root);
+        var data = new InputData();
 
         if (root.TryGetProperty("mapDefinition", out var md) && md.TryGetProperty("projected_crs", out var crs))
             data.ProjectedCrs = crs.GetInt32();
@@ -78,7 +94,7 @@ public sealed class InputData
                         T3 = t3,
                     });
                 }
-                int pad = w.TryGetProperty("pad_id", out var p) ? p.GetInt32() : 0;
+                int pad = w.TryGetProperty("pad_id", out var pid) ? pid.GetInt32() : 0;
                 if (w.TryGetProperty("wh_north", out var wn) && w.TryGetProperty("wh_east", out var we)
                     && wn.ValueKind == JsonValueKind.Number && we.ValueKind == JsonValueKind.Number)
                 {
@@ -109,6 +125,20 @@ public sealed class InputData
             }
         }
         return data;
+    }
+
+    /// <summary>Описание системы координат исходных данных (для журнала).</summary>
+    public string SourceCrs { get; private set; } = "";
+
+    internal void SetTable(int epsg, string title, string crs)
+    {
+        Format = "table"; ProjectedCrs = epsg; ProjectTitle = title ?? ""; SourceCrs = crs ?? "";
+    }
+
+    // ---- заполнение из загрузчика проекта
+    internal void SetProject(int epsg, JsonElement props, string title)
+    {
+        Format = "project"; ProjectedCrs = epsg; ProjectProps = props.Clone(); ProjectTitle = title ?? "";
     }
 
     private static Vec3 ReadPoint(JsonElement a) => new(a[0].GetDouble(), a[1].GetDouble(), a[2].GetDouble());
