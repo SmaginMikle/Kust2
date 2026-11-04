@@ -83,9 +83,13 @@ public static class TableLoader
         // ---- система координат
         string crs = (p.TableCrs ?? "Auto").Trim().ToLowerInvariant();
         bool degrees = recs.All(r => Math.Abs(r.x1) <= 180 && Math.Abs(r.y1) <= 90);
-        // восточная координата — та, в которой есть номер зоны (≥ 1 000 000 и остаток 100–900 км); иначе меньшая
-        bool xEast = !degrees && (HasZonePrefix(recs[0].x1) || (!HasZonePrefix(recs[0].y1) && recs[0].x1 < recs[0].y1));
-        if (crs == "auto") crs = degrees ? "wgs84" : HasZonePrefix(xEast ? recs[0].x1 : recs[0].y1) ? "gk" : "utm";
+        // Гаусс–Крюгер с номером зоны: обе координаты ≥ 1 000 000 (восточная с префиксом зоны, например 12 601 924).
+        // Восточная — та, что ≥ 10 000 000, иначе столбец X (TableXIsEast). Если одна координата < 1 000 000 —
+        // это метрическая система без префикса (UTM или местная), восточная — меньшая.
+        double ax = recs[0].x1, ay = recs[0].y1;
+        bool bothBig = ax >= 1e6 && ay >= 1e6;
+        bool xEast = degrees || (bothBig ? (ax >= 1e7 && ay < 1e7) || (!(ay >= 1e7 && ax < 1e7) && p.TableXIsEast) : ax < ay);
+        if (crs == "auto") crs = degrees ? "wgs84" : bothBig && HasZonePrefix(xEast ? ax : ay) ? "gk" : "utm";
 
         Func<double, double, (double lat, double lon)> toGeo;
         string crsName;

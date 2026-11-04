@@ -209,11 +209,19 @@ public sealed class Optimizer
         return Enumerable.Range(0, n).GroupBy(Find).Select(g => g.ToList()).OrderBy(g => g.Min()).ToList();
     }
 
+    /// <summary>Группы скважин меньше минимального размера куста (для них допускается один малый куст).</summary>
+    public List<List<int>> SmallGroups() => Groups().Where(g => g.Count < _p.MinWellsPerPad).ToList();
+
     /// <summary>Диапазон общего числа кустов при размере куста [Nmin, K].</summary>
     public (int min, int max) PadCountRange(int K)
     {
         int lo = 0, hi = 0;
-        foreach (var g in Groups()) { lo += (g.Count + K - 1) / K; hi += g.Count / _p.MinWellsPerPad; }
+        foreach (var g in Groups())
+        {
+            bool small = g.Count < _p.MinWellsPerPad;
+            lo += small ? 1 : (g.Count + K - 1) / K;
+            hi += small ? 1 : g.Count / _p.MinWellsPerPad;
+        }
         return (lo, hi);
     }
 
@@ -229,10 +237,12 @@ public sealed class Optimizer
         foreach (var g in Groups())
         {
             var opts = new Dictionary<int, (List<PadAssignment>, double)>();
-            int pMin = (g.Count + K - 1) / K, pMax = g.Count / _p.MinWellsPerPad;
+            // изолированная группа меньше минимального размера куста — один куст из всех её скважин
+            bool small = g.Count < _p.MinWellsPerPad;
+            int pMin = small ? 1 : (g.Count + K - 1) / K, pMax = small ? 1 : g.Count / _p.MinWellsPerPad;
             for (int p = pMin; p <= pMax; p++)
             {
-                var (pads, c) = OptimizeGroup(g, K, p);
+                var (pads, c) = OptimizeGroup(g, K, p, small ? g.Count : _p.MinWellsPerPad);
                 if (pads != null && !double.IsInfinity(c)) opts[p] = (pads, c);
             }
             if (opts.Count == 0) return (null, double.PositiveInfinity);
@@ -256,9 +266,9 @@ public sealed class Optimizer
         return (result, best.cost);
     }
 
-    private (List<PadAssignment>, double) OptimizeGroup(List<int> wells, int K, int p)
+    private (List<PadAssignment>, double) OptimizeGroup(List<int> wells, int K, int p, int nmin)
     {
-        int m = wells.Count, nmin = _p.MinWellsPerPad, ns = NSites;
+        int m = wells.Count, ns = NSites;
         if (p * nmin > m || p * K < m) return (null, double.PositiveInfinity);
         double dmin = _p.PadDiagonal(K) + _p.ExtraPadGap;
         var tn = wells.Select(w => _data.Wells[w].T1.N).ToArray();

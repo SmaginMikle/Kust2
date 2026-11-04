@@ -56,6 +56,8 @@ public sealed class Parameters
     // --- таблица Excel / CSV ---
     /// <summary>Система координат таблицы: Auto, GK (СК-42 Гаусс–Крюгер), UTM (ProjectedCrs), WGS84 (градусы).</summary>
     public string TableCrs { get; set; } = "Auto";
+    /// <summary>Столбец X таблицы — восточная координата (если по значениям это не определить).</summary>
+    public bool TableXIsEast { get; set; } = true;
     /// <summary>Зона Гаусса–Крюгера (0 — из префикса восточной координаты).</summary>
     public int TableGkZone { get; set; } = 0;
     /// <summary>Пересчёт СК-42 → WGS 84 (ГОСТ 32453-2017) для привязки к картам.</summary>

@@ -97,6 +97,9 @@ public sealed class Runner
         opt.BuildSites();
         opt.BuildSandTable();
         _log($"Кандидатных площадок: {opt.NSites}; таблица отсыпки готова ({sw.Elapsed.TotalSeconds:F1} с)");
+        foreach (var g in opt.SmallGroups())
+            _log($"Внимание: обособленная группа из {g.Count} скв. ({string.Join(", ", g.Select(i => data.Wells[i].Name))}) меньше минимального размера куста " +
+                 $"{p.MinWellsPerPad} — для неё допускается один куст меньшего размера.");
 
         var results = new List<VariantResult>();
         var evalMain = new Evaluator(p, data, map);
@@ -212,7 +215,15 @@ public sealed class Runner
         // рекомендуемый: сценарий с исходными параметрами, минимум нарушений, затем затрат
         var best = results.Where(r => r.Kind == "opt" && r.SameAs == null && r.Scenario == scenarios[0].name)
                           .OrderBy(r => r.Violations).ThenBy(r => r.TotalCost).FirstOrDefault()
-                   ?? results.OrderBy(r => r.Violations).ThenBy(r => r.TotalCost).First();
+                   ?? results.OrderBy(r => r.Violations).ThenBy(r => r.TotalCost).FirstOrDefault();
+        if (best == null)
+        {
+            foreach (var x in infeasible) _log($"{x.Name}: нет решения — {x.Reason}");
+            Reporting.WriteCsv(outDir, results, p, infeasible);
+            throw new InvalidOperationException(
+                $"Ни для одного варианта нет решения: скважины нельзя разбить на кусты по {p.MinWellsPerPad}–{p.EndMaxWellsPerPad} скв. " +
+                "Проверьте минимальное и максимальное число скважин на кусте и максимальный отход.");
+        }
 
         _log(Reporting.FormatSummary(results, best, p));
         foreach (var x in infeasible) _log($"{x.Name}: нет решения — {x.Reason}");
