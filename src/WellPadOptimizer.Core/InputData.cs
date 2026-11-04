@@ -94,7 +94,7 @@ public sealed class InputData
                         T3 = t3,
                     });
                 }
-                int pad = w.TryGetProperty("pad_id", out var p) ? p.GetInt32() : 0;
+                int pad = w.TryGetProperty("pad_id", out var pid) ? pid.GetInt32() : 0;
                 if (w.TryGetProperty("wh_north", out var wn) && w.TryGetProperty("wh_east", out var we)
                     && wn.ValueKind == JsonValueKind.Number && we.ValueKind == JsonValueKind.Number)
                 {
