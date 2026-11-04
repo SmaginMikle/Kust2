@@ -1,5 +1,5 @@
-# Выпуск релиза: при push тега вида v1.2.3 (или вручную) собираются автономные однофайловые
-# исполняемые файлы для Windows, Linux и macOS и прикладываются к релизу GitHub.
+# Выпуск релиза: при push тега v1.2.3 (или вручную) собираются автономные однофайловые программы
+# (консольная — для Windows, Linux, macOS; с графическим интерфейсом — для Windows) и прикладываются к релизу.
 name: release
 
 on:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Тег релиза (например, v1.0.0)'
+        description: 'Тег релиза (например, v2.0.0)'
         required: true
 
 permissions:
@@ -43,14 +43,17 @@ jobs:
           - rid: win-x64
             os: windows-2022
             exe: WellPadOptimizer.exe
+            gui: true
           - rid: linux-x64
             os: ubuntu-24.04
             exe: WellPadOptimizer
+            gui: false
           - rid: osx-arm64
             os: macos-14
             exe: WellPadOptimizer
+            gui: false
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
@@ -61,47 +64,38 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Найти проект
-        id: proj
-        run: |
-          PROJ=$(git ls-files '*.csproj' | head -n 1)
-          if [ -z "$PROJ" ]; then echo "::error::не найден .csproj"; exit 1; fi
-          echo "dir=$(dirname "$PROJ")" >> "$GITHUB_OUTPUT"
-          echo "file=$(basename "$PROJ")" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
       - name: Скачать Plotly для встраивания в отчёт
-        working-directory: ${{ steps.proj.outputs.dir }}
-        shell: bash
         run: |
           mkdir -p assets
           if [ ! -s assets/plotly.min.js ]; then
             curl -fsSL --retry 3 -o assets/plotly.min.js https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js \
               || curl -fsSL --retry 3 -o assets/plotly.min.js https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js
           fi
-          ls -l assets/plotly.min.js
           test $(wc -c < assets/plotly.min.js) -gt 1000000
 
-      - name: Publish (single file, self-contained)
-        working-directory: ${{ steps.proj.outputs.dir }}
+      - name: Publish — консольная программа
         run: |
-          dotnet publish ${{ steps.proj.outputs.file }} -c Release -r ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=None \
-            -p:Version=${{ steps.proj.outputs.version }} \
-            -o "$GITHUB_WORKSPACE/publish/${{ matrix.rid }}"
+          dotnet publish src/WellPadOptimizer.Cli/WellPadOptimizer.Cli.csproj -c Release -r ${{ matrix.rid }} \
+            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:Version=${TAG#v} \
+            -o "$GITHUB_WORKSPACE/publish/cli"
+
+      - name: Publish — графический интерфейс (Windows)
+        if: matrix.gui
+        run: |
+          dotnet publish src/WellPadOptimizer.Gui/WellPadOptimizer.Gui.csproj -c Release -r ${{ matrix.rid }} \
+            --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:Version=${TAG#v} \
+            -o "$GITHUB_WORKSPACE/publish/gui"
 
       - name: Упаковать
         id: pkg
-        working-directory: ${{ steps.proj.outputs.dir }}
         run: |
           PKG="WellPadOptimizer-$TAG-${{ matrix.rid }}"
           OUT="$GITHUB_WORKSPACE/dist/$PKG"
           mkdir -p "$OUT"
-          cp "$GITHUB_WORKSPACE/publish/${{ matrix.rid }}/${{ matrix.exe }}" "$OUT/"
+          cp "publish/cli/${{ matrix.exe }}" "$OUT/"
+          if [ "${{ matrix.gui }}" = "true" ]; then cp publish/gui/WellPadOptimizerGui.exe "$OUT/"; fi
           cp settings.json "$OUT/"
           [ -f README.md ] && cp README.md "$OUT/"
           [ -d data ] && cp -r data "$OUT/"
@@ -114,15 +108,11 @@ jobs:
           fi
           echo "name=$PKG" >> "$GITHUB_OUTPUT"
 
-      - name: Проверочный запуск собранного файла
+      - name: Проверочный запуск собранной программы
         working-directory: dist/${{ steps.pkg.outputs.name }}
         run: |
-          if [ -f data/input_mass.json ]; then
-            ./${{ matrix.exe }} --input data/input_mass.json --map data/terrain_map.asc --settings settings.json --out results --no-pause
-            test -f results/report.html
-          else
-            echo "::warning::нет data/input_mass.json — запуск пропущен"
-          fi
+          ./${{ matrix.exe }} --input data/input_mass.json --out results --no-pause
+          test -f results/report.html
 
       - name: Приложить к релизу
         env:
