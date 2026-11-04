@@ -39,7 +39,7 @@ public partial class MainWindow : Window
         string baseDir = AppContext.BaseDirectory;
         tbInput.Text = Path.Combine(baseDir, "data", "input_mass.json");
         tbSettings.Text = Path.Combine(baseDir, "settings.json");
-        tbOut.Text = Path.Combine(Environment.GetFolderPath(Environment.MyDocuments), "WellPadOptimizer", "results");
+        tbOut.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "WellPadOptimizer", "results");
         _p = File.Exists(tbSettings.Text) ? Parameters.Load(tbSettings.Text) : new Parameters();
         LoadParamsToUi(_p);
         _ready = true;
