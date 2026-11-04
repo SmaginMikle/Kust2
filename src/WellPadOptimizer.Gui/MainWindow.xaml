@@ -1,0 +1,208 @@
+<Window x:Class="WellPadOptimizer.Gui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WellPadOptimizer — кустование скважин"
+        Width="1440" Height="900" MinWidth="1000" MinHeight="640"
+        WindowStartupLocation="CenterScreen" FontSize="13" Background="#F4F5F2">
+    <Grid Margin="8">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="470" MinWidth="360" />
+            <ColumnDefinition Width="6" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ===================== левая панель: настройки ===================== -->
+        <DockPanel Grid.Column="0">
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="btnRun" Content="▶ Рассчитать" FontWeight="SemiBold" Click="BtnRun_Click" />
+                    <Button x:Name="btnStop" Content="■ Остановить" IsEnabled="False" Click="BtnStop_Click" />
+                    <Button x:Name="btnReport" Content="Открыть отчёт" IsEnabled="False" Click="BtnReport_Click" />
+                    <Button x:Name="btnFolder" Content="Папка результатов" IsEnabled="False" Click="BtnFolder_Click" />
+                </StackPanel>
+                <ProgressBar x:Name="pb" Height="6" Margin="0,8,0,0" IsIndeterminate="False" />
+                <TextBlock x:Name="tbStatus" Margin="0,4,0,0" Foreground="#4B5650" TextWrapping="Wrap" Text="Готово к расчёту." />
+            </StackPanel>
+
+            <TabControl x:Name="tabsLeft">
+                <!-- ---------- данные ---------- -->
+                <TabItem Header="Данные">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="Входной файл: input_mass.json, проект кустования КИН (.json) или таблица скважин Excel / CSV" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <DockPanel Margin="0,4,0,10">
+                            <Button x:Name="btnInput" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnInput_Click" />
+                            <TextBox x:Name="tbInput" />
+                        </DockPanel>
+                        <CheckBox x:Name="cbProjectSettings" Margin="0,0,0,10" IsChecked="True"
+                                  Content="Для проекта КИН: взять параметры расчёта и карту желательности из проекта" />
+                        <TextBlock Text="Файл настроек (settings.json)" FontWeight="SemiBold" />
+                        <DockPanel Margin="0,4,0,4">
+                            <Button x:Name="btnSettings" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnSettings_Click" />
+                            <TextBox x:Name="tbSettings" />
+                        </DockPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <Button x:Name="btnLoadSettings" Content="Загрузить" Click="BtnLoadSettings_Click" />
+                            <Button x:Name="btnSaveSettings" Content="Сохранить" Click="BtnSaveSettings_Click" />
+                            <Button x:Name="btnSaveSettingsAs" Content="Сохранить как…" Click="BtnSaveSettingsAs_Click" />
+                        </StackPanel>
+                        <TextBlock Text="Папка результатов" FontWeight="SemiBold" />
+                        <DockPanel Margin="0,4,0,10">
+                            <Button x:Name="btnOut" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnOut_Click" />
+                            <TextBox x:Name="tbOut" />
+                        </DockPanel>
+                        <TextBlock TextWrapping="Wrap" Foreground="#4B5650"
+                                   Text="Параметры ограничений и стоимости — на вкладке «Параметры», источник карты желательности — на вкладке «Карта». Результаты: report.html (3D, план, проекции, сравнение вариантов), таблицы CSV и инклинометрия." />
+                    </StackPanel>
+                </TabItem>
+
+                <!-- ---------- карта желательности ---------- -->
+                <TabItem Header="Карта">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="8">
+                            <GroupBox Header="Источник карты желательности">
+                                <StackPanel>
+                                    <RadioButton x:Name="rbMapNone" GroupName="map" Margin="0,2" Content="Без карты — вся поверхность суходол" Checked="MapSource_Changed" />
+                                    <RadioButton x:Name="rbMapKin" GroupName="map" Margin="0,2" Content="Карта в формате КИН (.bin)" Checked="MapSource_Changed" />
+                                    <RadioButton x:Name="rbMapOsm" GroupName="map" Margin="0,2" Content="Открытые источники (OpenStreetMap)" Checked="MapSource_Changed" />
+                                    <RadioButton x:Name="rbMapAsc" GroupName="map" Margin="0,2" Content="Растр ESRI ASCII Grid (.asc) в проекции скважин" Checked="MapSource_Changed" />
+                                    <TextBlock x:Name="lblMapFile" Text="Файл карты" Margin="0,8,0,2" />
+                                    <DockPanel x:Name="dpMapFile">
+                                        <Button x:Name="btnMapFile" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnMapFile_Click" />
+                                        <TextBox x:Name="tbMapFile" />
+                                    </DockPanel>
+                                    <DockPanel Margin="0,8,0,0">
+                                        <TextBlock Text="Шаг растра для КИН и OSM, м" VerticalAlignment="Center" />
+                                        <TextBox x:Name="tbCellSize" Width="70" HorizontalAlignment="Right" />
+                                    </DockPanel>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox x:Name="gbKin" Header="Карта КИН">
+                                <StackPanel>
+                                    <CheckBox x:Name="cbKinSouth" Content="Строки сетки идут от южного края (как в Surfer)" Margin="0,2" />
+                                    <CheckBox x:Name="cbKinNoData" Content="Ячейки без данных и область вне карты — запретная зона" Margin="0,2" />
+                                    <TextBlock Text="Соответствие значений карты КИН классам местности:" Margin="0,6,0,2" />
+                                    <DataGrid x:Name="dgKin" Height="120" CanUserAddRows="True" AutoGeneratingColumn="Grid_AutoGeneratingColumn" />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox x:Name="gbOsm" Header="OpenStreetMap">
+                                <StackPanel>
+                                    <RadioButton x:Name="rbOsmOverpass" GroupName="osm" Content="Загрузить через Overpass API (нужен интернет)" Margin="0,2" />
+                                    <DockPanel Margin="18,2,0,4">
+                                        <TextBlock Text="Адрес" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBox x:Name="tbOverpass" />
+                                    </DockPanel>
+                                    <RadioButton x:Name="rbOsmFile" GroupName="osm" Content="Из файла: GeoJSON или сохранённый ответ Overpass (поле «Файл карты»)" Margin="0,2" />
+                                    <TextBlock Text="Слои:" Margin="0,6,0,2" />
+                                    <WrapPanel>
+                                        <CheckBox x:Name="cbWetlands" Content="Болота" Margin="0,2,14,2" />
+                                        <CheckBox x:Name="cbWater" Content="Озёра, водохранилища" Margin="0,2,14,2" />
+                                        <CheckBox x:Name="cbRivers" Content="Реки и ручьи" Margin="0,2,14,2" />
+                                        <CheckBox x:Name="cbProtected" Content="Природоохранные территории (запрет)" Margin="0,2,14,2" />
+                                        <CheckBox x:Name="cbCedar" Content="Кедровники" Margin="0,2,14,2" />
+                                        <CheckBox x:Name="cbForest" Content="Прочий лес" Margin="0,2,14,2" />
+                                        <CheckBox x:Name="cbBuilt" Content="Застройка, промзоны (запрет)" Margin="0,2,14,2" />
+                                    </WrapPanel>
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="70" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Text="Ширина реки (без тега width), м" VerticalAlignment="Center" />
+                                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="tbRiverW" Margin="0,1" />
+                                        <TextBlock Grid.Row="1" Text="Ширина канала, м" VerticalAlignment="Center" />
+                                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="tbCanalW" Margin="0,1" />
+                                        <TextBlock Grid.Row="2" Text="Ширина ручья, канавы, м" VerticalAlignment="Center" />
+                                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="tbStreamW" Margin="0,1" />
+                                        <TextBlock Grid.Row="3" Text="Водоохранная полоса (запрет), м" VerticalAlignment="Center" />
+                                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="tbWaterBuffer" Margin="0,1" />
+                                    </Grid>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Классы местности">
+                                <StackPanel>
+                                    <DataGrid x:Name="dgTerrain" Height="150" CanUserAddRows="True" AutoGeneratingColumn="Grid_AutoGeneratingColumn" />
+                                    <TextBlock TextWrapping="Wrap" Foreground="#4B5650" Margin="0,4,0,0"
+                                               Text="Отсыпка: высота по классу, откос 1:m; доп. затраты — компенсации за площадь куста (вырубка, рекультивация). «Запрет» исключает класс из размещения кустов." />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button x:Name="btnPreviewMap" Content="Построить карту (предпросмотр)" Click="BtnPreviewMap_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- ---------- параметры ---------- -->
+                <TabItem Header="Параметры">
+                    <DataGrid x:Name="dgParams" Margin="4" AutoGeneratingColumn="Grid_AutoGeneratingColumn" />
+                </TabItem>
+            </TabControl>
+        </DockPanel>
+
+        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+        <!-- ===================== правая панель: результаты ===================== -->
+        <DockPanel Grid.Column="2">
+            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                <TextBlock Text="Вариант:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <ComboBox x:Name="cbVariant" Width="440" SelectionChanged="CbVariant_SelectionChanged" />
+                <TextBlock Text="Участок:" VerticalAlignment="Center" Margin="14,0,6,0" />
+                <ComboBox x:Name="cbRegion" Width="190" SelectionChanged="CbRegion_SelectionChanged" />
+                <TextBlock Text="Масштаб плана:" VerticalAlignment="Center" Margin="14,0,6,0" />
+                <Slider x:Name="slZoom" Width="140" Minimum="0.05" Maximum="4" Value="0.4" VerticalAlignment="Center" ValueChanged="SlZoom_ValueChanged" />
+                <TextBlock Text="Вертикаль 3D:" VerticalAlignment="Center" Margin="14,0,6,0" />
+                <ComboBox x:Name="cbZ" Width="70" SelectionChanged="CbZ_SelectionChanged">
+                    <ComboBoxItem Content="× 1" />
+                    <ComboBoxItem Content="× 2" IsSelected="True" />
+                    <ComboBoxItem Content="× 4" />
+                </ComboBox>
+            </WrapPanel>
+
+            <TabControl x:Name="tabsRight">
+                <TabItem Header="Журнал">
+                    <TextBox x:Name="tbLog" IsReadOnly="True" FontFamily="Consolas, Courier New" FontSize="12"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" Background="White" />
+                </TabItem>
+                <TabItem Header="План и карта">
+                    <DockPanel>
+                        <WrapPanel x:Name="wpLegend" DockPanel.Dock="Bottom" Margin="4" />
+                        <ScrollViewer x:Name="svPlan" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                      Background="White" PreviewMouseWheel="SvPlan_PreviewMouseWheel">
+                            <Grid x:Name="gridPlan" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                <Grid.LayoutTransform>
+                                    <ScaleTransform x:Name="scalePlan" ScaleX="0.4" ScaleY="0.4" />
+                                </Grid.LayoutTransform>
+                                <Image x:Name="imgMap" Stretch="None" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                                <Canvas x:Name="cvPlan" />
+                            </Grid>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+                <TabItem Header="3D">
+                    <Grid Background="White">
+                        <Viewport3D x:Name="vp3d" ClipToBounds="True" />
+                        <TextBlock Text="Вращение — левая кнопка мыши, масштаб — колесо" Margin="8" Foreground="#78827C"
+                                   VerticalAlignment="Bottom" HorizontalAlignment="Left" IsHitTestVisible="False" />
+                    </Grid>
+                </TabItem>
+                <TabItem Header="Варианты">
+                    <DataGrid x:Name="dgVariants" IsReadOnly="True" SelectionMode="Single"
+                              AutoGeneratingColumn="Grid_AutoGeneratingColumn" SelectionChanged="DgVariants_SelectionChanged" />
+                </TabItem>
+                <TabItem Header="Кусты">
+                    <DataGrid x:Name="dgPads" IsReadOnly="True" AutoGeneratingColumn="Grid_AutoGeneratingColumn" />
+                </TabItem>
+                <TabItem Header="Скважины">
+                    <DataGrid x:Name="dgWells" IsReadOnly="True" AutoGeneratingColumn="Grid_AutoGeneratingColumn" />
+                </TabItem>
+            </TabControl>
+        </DockPanel>
+    </Grid>
+</Window>

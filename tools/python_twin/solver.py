@@ -9,6 +9,8 @@ class P:  # параметры (со скриншота)
     Dls1 = 0.5; Dls2 = 1.5; DlsBase = 10.0
     UseAzTurn = True; MaxAzTurn = 90.0; VertLen = 40.0
     StartMaxWells = 10; EndMaxWells = 24; VariantStep = 1
+ 
+    PadLayout = 'Single'; ZMinWells = 12; ZRowSpacing = 50.0; ZRowShift = 0.0; ZFactor = 1.0
     MinWells = 10                       # мин. число скважин на кусте (= начальное значение диапазона)
     SoftRadiusFactor = 1.6              # поиск площадок до 1,6·MaxOffset: нарушения допускаются со штрафом
     PenViol = 1.0e6; PenOffset = 1000.0; PenAz = 10000.0; PenMD = 1000.0   # тыс. руб.
@@ -47,11 +49,38 @@ def slot_offsets(n):
     return [x - c for x in s]
 
 def pad_len(n): return max(P.PadMinLen, row_len(n) + 2 * P.PadEndMargin)
-def pad_diag(n): return math.hypot(pad_len(n), P.PadWidth)
+
+def layouts_for(n):
+    zok = n >= max(2, P.ZMinWells); m = P.PadLayout.lower()
+    if m == 'z': return [True] if zok else [False]
+    if m == 'auto': return [False, True] if zok else [False]
+    return [False]
+
+def z_rows(n): return (n + 1) // 2, n // 2
+
+def dims(n, z):
+    if not z: return pad_len(n), P.PadWidth
+    a, b = z_rows(n)
+    return max(P.PadMinLen, max(row_len(a), row_len(b)) + abs(P.ZRowShift) + 2 * P.PadEndMargin), P.PadWidth + P.ZRowSpacing
+
+def slot_positions(n, z):
+    if not z: return [(x, 0.0) for x in slot_offsets(n)]
+    a, b = z_rows(n)
+    res = [(x - P.ZRowShift / 2, P.ZRowSpacing / 2) for x in slot_offsets(a)]
+    res += [(x + P.ZRowShift / 2, -P.ZRowSpacing / 2) for x in reversed(slot_offsets(b))]
+    return res
+
+def build_cost_z(n, z): return pad_build_cost(n) * (P.ZFactor if z else 1.0)
+
+def pad_diag(n):
+    return max(math.hypot(*dims(n, z)) for z in ([False] if P.PadLayout.lower() == 'single' else [False, True]))
 
 # ---------------- карта ----------------
 class Terrain:
     def __init__(self, path):
+        if not path or path == '-' or not os.path.exists(path):
+            self.uniform = True; return   # карта не задана: везде суходол
+        self.uniform = False
         with open(path) as f:
             hdr = {}
             for _ in range(6):
@@ -62,6 +91,7 @@ class Terrain:
         self.nodata = int(hdr['nodata_value'])
     def cls(self, E, N):  # векторно; вне карты -> 9
         E = np.asarray(E); N = np.asarray(N)
+        if self.uniform: return np.full(E.shape, 1, dtype=np.int16)
         ix = np.floor((E - self.x0) / self.cs).astype(int)
         iy = self.nr - 1 - np.floor((N - self.y0) / self.cs).astype(int)
         ok = (ix >= 0) & (ix < self.nc) & (iy >= 0) & (iy < self.nr)
@@ -72,15 +102,15 @@ class Terrain:
 
 def footprint_samples():
     """точки (s вдоль ряда, w поперёк) для макс. площадки; одинаковы для всех n"""
-    half = pad_len(P.EndMaxWells) / 2 + P.ForbiddenBuffer
-    hw = P.PadWidth / 2 + P.ForbiddenBuffer
+    half = max(dims(P.EndMaxWells, False)[0], dims(P.EndMaxWells, True)[0]) / 2 + P.ForbiddenBuffer
+    hw = max(dims(P.EndMaxWells, False)[1], dims(P.EndMaxWells, True)[1]) / 2 + P.ForbiddenBuffer
     ns = int(math.ceil(half / P.SampleStep)); nw = int(math.ceil(hw / P.SampleStep))
     pts = [(i * P.SampleStep if abs(i) < ns else math.copysign(half, i), j * P.SampleStep if abs(j) < nw else math.copysign(hw, j))
            for i in range(-ns, ns + 1) for j in range(-nw, nw + 1)]
     return np.array(pts)
 
-def sand_volume(frac, n):
-    L, W = pad_len(n), P.PadWidth
+def sand_volume(frac, n, z=False):
+    L, W = dims(n, z)
     return sum(frac[c] * h * (L + P.SlopeM * h) * (W + P.SlopeM * h) for c, h in P.FillHeight.items())
 
 def site_sand_table(terr, sites, nmax):
@@ -94,18 +124,18 @@ def site_sand_table(terr, sites, nmax):
         dN = S[:, 0] * u[0] + S[:, 1] * v[0]; dE = S[:, 0] * u[1] + S[:, 1] * v[1]
         C = terr.cls(sites[:, 1][:, None] + dE[None, :], sites[:, 0][:, None] + dN[None, :])
         for n in range(1, nmax + 1):
-            m_s = np.abs(S[:, 0]) <= pad_len(n) / 2 + P.ForbiddenBuffer + 1e-6
-            m_w = np.abs(S[:, 1]) <= P.PadWidth / 2 + P.ForbiddenBuffer + 1e-6
+          for z in layouts_for(n):
+            L, W = dims(n, z)
+            m_s = np.abs(S[:, 0]) <= L / 2 + P.ForbiddenBuffer + 1e-6
+            m_w = np.abs(S[:, 1]) <= W / 2 + P.ForbiddenBuffer + 1e-6
             sub = C[:, m_s & m_w]
             forb = (sub == 9).any(axis=1)
-            # доли классов — только по самой площадке (без буфера)
-            m_in = (np.abs(S[:, 0]) <= pad_len(n) / 2 + 1e-6) & (np.abs(S[:, 1]) <= P.PadWidth / 2 + 1e-6)
+            m_in = (np.abs(S[:, 0]) <= L / 2 + 1e-6) & (np.abs(S[:, 1]) <= W / 2 + 1e-6)
             sub2 = C[:, m_in]; cnt = sub2.shape[1]
             vol = np.zeros(ns)
-            L, W = pad_len(n), P.PadWidth
             for c, h in P.FillHeight.items():
                 vol += (sub2 == c).sum(1) / cnt * h * (L + P.SlopeM * h) * (W + P.SlopeM * h)
-            cost = np.where(forb, np.inf, vol / 1000 * P.SandCostPer1000)
+            cost = np.where(forb, np.inf, vol / 1000 * P.SandCostPer1000 + build_cost_z(n, z) - pad_build_cost(n))
             better = cost < sand[:, n] - 1e-9
             sand[better, n] = cost[better]; best_ang[better, n] = ai
     return sand, best_ang
@@ -177,6 +207,12 @@ def soft_cost(S, T1, T3):
     ex = (pr['mdT3'] if P.LimitsToBottomHole else pr['mdT1']) - P.MaxMD
     if ex > 1e-6: pen += P.PenViol + P.PenMD * ex; nv += 1
     return drill_cost(pr) + pen, nv
+
+def oriented(W, S):
+    """(T1, T3, reversed) — для целей с rev выбирается направление ГС с меньшей стоимостью"""
+    if not W.get('rev') or np.linalg.norm(W['T3'] - W['T1']) < 1e-6: return W['T1'], W['T3'], False
+    a, _ = soft_cost(S, W['T1'], W['T3']); b, _ = soft_cost(S, W['T3'], W['T1'])
+    return (W['T3'], W['T1'], True) if b < a else (W['T1'], W['T3'], False)
 
 def drill_cost(pr): return P.CostNNS * pr['mdT1'] + P.CostGS * pr['hz']
 
@@ -277,6 +313,9 @@ class Problem:
             for s in np.nonzero(off <= Rs)[0]:
                 S = (self.sites[s, 0], self.sites[s, 1])
                 c, nv = soft_cost(S, T1, T3)
+                if w.get('rev') and np.linalg.norm(T3 - T1) > 1e-6:
+                    c2, nv2 = soft_cost(S, T3, T1)
+                    if c2 < c: c, nv = c2, nv2
                 C[s, j] = c; V[s, j] = nv
         self.C = C; self.V = V
         print('pairs', np.isfinite(C).sum(), 'without violations', (np.isfinite(C) & (V == 0)).sum())
@@ -415,18 +454,18 @@ def pad_count_range(prob, K):
     return sum(math.ceil(len(w) / K) for w in regs), sum(len(w) // P.MinWells for w in regs)
 
 # ---------------- финальная оценка варианта ----------------
-def pad_geometry(terr, center, n, mean_hz_az):
+def pad_geometry(terr, center, n, mean_hz_az, z=False):
     """подбор ориентации для фактической площадки"""
-    S = footprint_samples(); best = None
+    S = footprint_samples(); best = None; L, W = dims(n, z)
     for a in P.Angles:
         u = np.array([math.cos(a * DEG), math.sin(a * DEG)]); v = np.array([-math.sin(a * DEG), math.cos(a * DEG)])
-        m_b = (np.abs(S[:, 0]) <= pad_len(n) / 2 + P.ForbiddenBuffer + 1e-6) & (np.abs(S[:, 1]) <= P.PadWidth / 2 + P.ForbiddenBuffer + 1e-6)
-        m_in = (np.abs(S[:, 0]) <= pad_len(n) / 2 + 1e-6) & (np.abs(S[:, 1]) <= P.PadWidth / 2 + 1e-6)
+        m_b = (np.abs(S[:, 0]) <= L / 2 + P.ForbiddenBuffer + 1e-6) & (np.abs(S[:, 1]) <= W / 2 + P.ForbiddenBuffer + 1e-6)
+        m_in = (np.abs(S[:, 0]) <= L / 2 + 1e-6) & (np.abs(S[:, 1]) <= W / 2 + 1e-6)
         dN = S[:, 0] * u[0] + S[:, 1] * v[0]; dE = S[:, 0] * u[1] + S[:, 1] * v[1]
         cl = terr.cls(center[1] + dE, center[0] + dN)
         forb = bool((cl[m_b] == 9).any())
         sub = cl[m_in]; frac = {c: float((sub == c).mean()) for c in P.FillHeight}
-        vol = sand_volume(frac, n); cost = vol / 1000 * P.SandCostPer1000
+        vol = sand_volume(frac, n, z); cost = vol / 1000 * P.SandCostPer1000
         perp = abs(((a - (mean_hz_az + 90)) + 90) % 180 - 90) if mean_hz_az is not None else 0
         key = (forb, round(cost, 0), perp)
         if best is None or key < best[0]: best = (key, a, vol, cost, frac, forb)
@@ -449,19 +488,32 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
                 ev = np.linalg.eigh(dd.T @ dd)[1][:, -1]; ang = az_of(ev[0], ev[1]) % 180
             else: ang = 0
             _, _, vol, scost, frac, forb = pad_geometry_fixed(prob.terr, c, n, ang)
-            angle = ang; slots = {w: fixed_wh[w] for w in ws}
+            angle = ang; slots = {w: fixed_wh[w] for w in ws}; zpad = False
         else:
-            (forb, _, _), angle, vol, scost, frac, forb = pad_geometry(prob.terr, c, n, mean_az)
-            u = np.array([math.cos(angle * DEG), math.sin(angle * DEG)])
-            offs = slot_offsets(n)
-            order = sorted(ws, key=lambda w: (prob.wells[w]['T1'][:2] - c) @ u)
-            order = improve_slots(prob, order, c, u, offs)
-            slots = {w: tuple(c + offs[k] * u) for k, w in enumerate(order)}
+            best = None
+            for z in layouts_for(n):
+                (forb_z, _, _), ang, vol_z, scost_z, frac_z, _f = pad_geometry(prob.terr, c, n, mean_az, z)
+                u = np.array([math.cos(ang * DEG), math.sin(ang * DEG)]); v = np.array([-math.sin(ang * DEG), math.cos(ang * DEG)])
+                pos = [tuple(c + s_ * u + w_ * v) for s_, w_ in slot_positions(n, z)]
+                U = lambda w: (prob.wells[w]['T1'][:2] - c) @ u
+                V = lambda w: (prob.wells[w]['T1'][:2] - c) @ v
+                if not z: order = sorted(ws, key=lambda w: (U(w), w))
+                else:
+                    na, _ = z_rows(n); byv = sorted(ws, key=lambda w: (-V(w), w))
+                    order = sorted(byv[:na], key=lambda w: (U(w), w)) + sorted(byv[na:], key=lambda w: (-U(w), w))
+                order, drill = improve_slots(prob, order, pos)
+                total = (1e12 if forb_z else 0) + scost_z + build_cost_z(n, z) + drill
+                if best is None or total < best[0]:
+                    best = (total, z, ang, vol_z, scost_z, frac_z, forb_z, {w: pos[k] for k, w in enumerate(order)})
+            _, zpad, angle, vol, scost, frac, forb, slots = best
         pad = dict(id=pi + 1, name=f"К-{pi+1}", N=float(c[0]), E=float(c[1]), n=n, angle=float(angle),
-                   length=pad_len(n), width=P.PadWidth, terrain={str(k): round(v, 3) for k, v in frac.items()},
-                   sand_volume=vol, sand_cost=scost, build_cost=pad_build_cost(n), forbidden=forb, wells=[])
+                   length=dims(n, zpad)[0], width=dims(n, zpad)[1], terrain={str(k): round(v, 3) for k, v in frac.items()},
+                   sand_volume=vol, sand_cost=scost, build_cost=build_cost_z(n, zpad), forbidden=forb, wells=[], z=zpad,
+                   nds1=float(angle) % 360, nds2=(float(angle) + 180) % 360 if zpad else None)
         for k, w in enumerate(list(slots)):
-            W = prob.wells[w]; S = slots[w]
+            W0 = prob.wells[w]; S = slots[w]
+            T1o, T3o, revd = oriented(W0, S)
+            W = dict(W0, T1=T1o, T3=T3o)
             pr = solve_profile(S, W['T1'], W['T3'])
             off = math.hypot(W['T1'][0] - S[0], W['T1'][1] - S[1])
             turn = az_turn(S, W['T1'], W['T3'])
@@ -482,7 +534,7 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
                 rec.update(mdT1=pr['mdT1'], mdT3=pr['mdT3'], tangent=pr['L'], inc_tangent=pr['inc_t'],
                            az_tangent=az_of(pr['d'][0], pr['d'][1]), cost=drill_cost(pr), cost_nns=P.CostNNS * pr['mdT1'],
                            cost_gs=P.CostGS * pr['hz'], hook=hook, torque=tq, maxdls=float(sv[:, 6].max()), survey=sv)
-            rec['viol'] = viol
+            rec['viol'] = viol; rec['rev'] = revd
             pad['wells'].append(rec['well']); res['wells'].append(rec)
         res['pads'].append(pad)
     # антиколлизия внутри куста
@@ -512,9 +564,10 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
     return res
 
 def shallow_path(prob, w, S):
-    W = prob.wells[w]; pr = solve_profile(S, W['T1'], W['T3'])
+    T1, T3, _ = oriented(prob.wells[w], S)
+    pr = solve_profile(S, T1, T3)
     if pr is None: return None, math.inf
-    sv = survey(S, W['T1'], W['T3'], pr)
+    sv = survey(S, T1, T3, pr)
     sv = sv[(sv[:, 0] > P.VertLen) & (sv[:, 0] <= P.AcMaxMD)]
     return sv[:, 3:6], drill_cost(pr)
 
@@ -523,13 +576,12 @@ def min_sep(a, b):
     m = min(len(a), len(b))  # сравнение по одинаковым MD (одинаковая сетка MD)
     return float(np.sqrt(((a[:m] - b[:m]) ** 2).sum(1)).min())
 
-def improve_slots(prob, order, c, u, offs):
-    """перестановки скважин по слотам: максимизация мин. сближения (до AcMaxMD), затем мин. стоимость"""
+def improve_slots(prob, order, pos):
+    """перестановки скважин по слотам pos: максимизация мин. сближения (до AcMaxMD), затем мин. стоимость; -> (order, drill)"""
     n = len(order)
-    if n < 2: return order
     cache = {}
     def path(w, k):
-        if (w, k) not in cache: cache[(w, k)] = shallow_path(prob, w, tuple(c + offs[k] * u))
+        if (w, k) not in cache: cache[(w, k)] = shallow_path(prob, w, pos[k])
         return cache[(w, k)]
     def score(ordr):
         ms = math.inf; cost = 0.0
@@ -539,6 +591,7 @@ def improve_slots(prob, order, c, u, offs):
                 ms = min(ms, min_sep(pa, path(ordr[j], j)[0]))
         return (min(ms, P.MinSeparation), -cost)
     cur = score(order); order = list(order)
+    if n < 2: return order, -cur[1]
     for _ in range(4):
         imp = False
         for i in range(n):
@@ -548,7 +601,7 @@ def improve_slots(prob, order, c, u, offs):
                 if sc > cur: cur = sc; imp = True
                 else: order[i], order[j] = order[j], order[i]
         if not imp: break
-    return order
+    return order, -cur[1]
 
 def pad_geometry_fixed(terr, center, n, ang):
     S = footprint_samples(); a = ang

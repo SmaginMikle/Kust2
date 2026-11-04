@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>WellPadOptimizer</RootNamespace>
+    <AssemblyName>WellPadOptimizer.Core</AssemblyName>
+    <Version>2.0.0</Version>
+    <Description>Кустование скважин, расчёт траекторий и затрат — вычислительное ядро</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="report_template.html" LogicalName="report_template.html" />
+    <!-- Plotly встраивается в отчёт, если файл скачан в assets/ (это делают workflow GitHub) -->
+    <EmbeddedResource Include="..\..\assets\plotly.min.js" LogicalName="plotly.min.js" Condition="Exists('..\..\assets\plotly.min.js')" />
+  </ItemGroup>
+
+</Project>

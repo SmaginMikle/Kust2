@@ -2,11 +2,21 @@
 import json, math, os, sys, pickle, datetime
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
-from solver import P, Terrain, Problem, pad_len
+from solver import P, Terrain, Problem, pad_len, pad_diag
 
 inp, mapf, outdir, tpl = sys.argv[1:5]
 (results, infeasible) = pickle.load(open(os.path.join(outdir, 'results.pkl'), 'rb'))
 terr = Terrain(mapf); prob = Problem(inp, terr)
+terr_uniform = terr.uniform
+_nf = os.path.join(outdir, 'names.json')
+if os.path.exists(_nf):
+    for w, (nm, uid) in zip(prob.wells, json.load(open(_nf))): w['name'] = nm; w['uid'] = uid
+if terr.uniform:   # однородная сетка суходола для отчёта
+    allE = [x for w in prob.wells for x in (w['T1'][1], w['T3'][1])]; allN = [x for w in prob.wells for x in (w['T1'][0], w['T3'][0])]
+    mg = P.MaxOffset * P.SoftRadiusFactor + pad_diag(P.EndMaxWells) + 500
+    terr.x0 = math.floor((min(allE) - mg) / 1000) * 1000; terr.y0 = math.floor((min(allN) - mg) / 1000) * 1000
+    terr.cs = 100.0; terr.nc = int(round((math.ceil((max(allE) + mg) / 1000) * 1000 - terr.x0) / 100)); terr.nr = int(round((math.ceil((max(allN) + mg) / 1000) * 1000 - terr.y0) / 100))
+    terr.g = np.ones((terr.nr, terr.nc), dtype=np.int16); terr.nodata = -9999
 W = prob.wells
 names = {'1': 'Суходол', '2': 'Болото', '3': 'Водоём'}
 
@@ -14,7 +24,7 @@ def r1(x, d=1):
     return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else round(float(x), d)
 
 # лучший — допустимый оптимизационный вариант первого сценария
-cands = [r for r in results if r['kind'] == 'opt' and not r.get('same_as') and r.get('scenario', '').startswith('Разворот')]
+cands = [r for r in results if r['kind'] == 'opt' and not r.get('same_as') and r.get('scenario', '') == (os.environ.get('BEST_SCENARIO') or r.get('scenario', '')) and (os.environ.get('BEST_SCENARIO') or r.get('scenario', '').startswith('Разворот'))]
 best = min(cands, key=lambda r: (r['violations'], r['total_cost']))
 
 # участки (как Reporting.Regions)
@@ -47,7 +57,8 @@ def variant_json(r):
     if r.get('same_as'): return d
     d['pads'] = [dict(name=p['name'], n=r1(p['N'], 2), e=r1(p['E'], 2), count=p['n'], angle=r1(p['angle']), length=r1(p['length']), width=r1(p['width']),
                       terrain={k: round(v, 3) for k, v in p['terrain'].items()}, sandVolume=r1(p['sand_volume'], 0), sandCost=r1(p['sand_cost']),
-                      buildCost=r1(p['build_cost']), forbidden=p['forbidden'], wells=p['wells']) for p in r['pads']]
+                      buildCost=r1(p['build_cost']), forbidden=p['forbidden'], wells=p['wells'],
+                      z=bool(p.get('z', False)), nds1=r1(p.get('nds1', p['angle']), 0), nds2=r1(p.get('nds2'), 0)) for p in r['pads']]
     ws = []
     slot = {}
     for w in r['wells']:
@@ -68,7 +79,7 @@ def variant_json(r):
     d['wells'] = ws
     return d
 
-R = dict(meta=dict(input='input_mass.json', map=os.path.basename(mapf), generated=datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
+R = dict(meta=dict(input='input_mass.json', map=(os.environ.get('MAPNAME') or ('не задана — вся территория: суходол' if terr_uniform else os.path.basename(mapf))), generated=datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
                    engine='Python-двойник WellPadOptimizer', best=best['name'], infeasible=infeasible,
                    params=dict(MaxOffset=P.MaxOffset, MaxMD=P.MaxMD, Dls1=P.Dls1, Dls2=P.Dls2, VerticalLength=P.VertLen, UseAzimuthTurn=True,
                                MaxAzimuthTurn=P.MaxAzTurn, MaxHookLoad=P.MaxHookLoad, MaxTorque=P.MaxTorque, CostNNS=P.CostNNS, CostGS=P.CostGS,
