@@ -1,4 +1,4 @@
-# Сборка и проверочный расчёт при каждом push / pull request
+# Сборка решения (ядро, консоль, интерфейс WPF) и проверочные расчёты при каждом push / pull request
 name: build
 
 on:
@@ -18,7 +18,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
@@ -26,27 +26,7 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # Проект может лежать как в корне репозитория, так и во вложенной папке
-      - name: Найти проект
-        id: proj
-        shell: bash
-        run: |
-          PROJ=$(git ls-files '*.csproj' | head -n 1)
-          if [ -z "$PROJ" ]; then
-            echo "::error::В репозитории не найден файл .csproj. Загрузите WellPadOptimizer.csproj и папку src/."
-            git ls-files | head -n 50
-            exit 1
-          fi
-          DIR=$(dirname "$PROJ")
-          echo "Проект: $PROJ"
-          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
-          echo "file=$(basename "$PROJ")" >> "$GITHUB_OUTPUT"
-          for f in settings.json report_template.html data/input_mass.json data/terrain_map.asc; do
-            if [ -f "$DIR/$f" ]; then echo "  есть: $f"; else echo "::warning::нет файла $DIR/$f"; fi
-          done
-
       - name: Скачать Plotly для встраивания в отчёт
-        working-directory: ${{ steps.proj.outputs.dir }}
         shell: bash
         run: |
           mkdir -p assets
@@ -54,33 +34,40 @@ jobs:
             curl -fsSL --retry 3 -o assets/plotly.min.js https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js \
               || curl -fsSL --retry 3 -o assets/plotly.min.js https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js
           fi
-          ls -l assets/plotly.min.js
           test $(wc -c < assets/plotly.min.js) -gt 1000000
 
       - name: Restore
-        working-directory: ${{ steps.proj.outputs.dir }}
-        run: dotnet restore ${{ steps.proj.outputs.file }}
+        run: dotnet restore WellPadOptimizer.sln
 
+      # WPF-интерфейс собирается и на Linux благодаря EnableWindowsTargeting (запускается только в Windows)
       - name: Build
-        working-directory: ${{ steps.proj.outputs.dir }}
-        run: dotnet build ${{ steps.proj.outputs.file }} -c Release --no-restore
+        run: dotnet build WellPadOptimizer.sln -c Release --no-restore
 
-      - name: Проверочный расчёт
-        working-directory: ${{ steps.proj.outputs.dir }}
-        shell: bash
-        run: |
-          if [ ! -f data/input_mass.json ]; then
-            echo "::warning::data/input_mass.json не найден — расчёт пропущен"
-            exit 0
-          fi
-          dotnet run --project ${{ steps.proj.outputs.file }} -c Release --no-build -- \
-            --input data/input_mass.json --map data/terrain_map.asc --settings settings.json --out ci_results --no-pause
+      - name: Расчёт без карты (вся поверхность — суходол)
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --out ci_results/no_map --no-pause
 
-      - name: Сохранить результаты расчёта
+      - name: Расчёт по карте КИН
+        if: hashFiles('data/kin_map_example.bin') != ''
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --map-source Kin --map data/kin_map_example.bin --out ci_results/kin --no-pause
+
+      - name: Расчёт по таблице Excel (СК-42, Гаусс–Крюгер)
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/wells_example.xlsx --map-source Kin --map data/kin_map_example.bin --out ci_results/xlsx --no-pause
+
+      - name: Расчёт по таблице CSV (координаты без проекции)
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/wells_example.csv --out ci_results/csv --no-pause
+
+      - name: Расчёт с Z-кустами
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --pad-layout Auto --out ci_results/z --no-pause
+
+      - name: Расчёт по OpenStreetMap (Overpass API)
+        continue-on-error: true
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --map-source Osm --osm-mode Overpass --out ci_results/osm --no-pause
+
+      - name: Сохранить результаты расчётов
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: ci-results
-          path: ${{ steps.proj.outputs.dir }}/ci_results/
+          path: ci_results/
           if-no-files-found: ignore
           retention-days: 14
