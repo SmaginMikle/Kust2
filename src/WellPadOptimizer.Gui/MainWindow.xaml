@@ -11,7 +11,7 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- ===================== левая панель: настройки ===================== -->
+        <!-- = левая панель: настройки = -->
         <DockPanel Grid.Column="0">
             <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
                 <StackPanel Orientation="Horizontal">
@@ -25,7 +25,7 @@
             </StackPanel>
 
             <TabControl x:Name="tabsLeft">
-                <!-- ---------- данные ---------- -->
+                <!-- данные -->
                 <TabItem Header="Данные">
                     <StackPanel Margin="8">
                         <TextBlock Text="Входной файл: input_mass.json, проект кустования КИН (.json) или таблица скважин Excel / CSV" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -55,7 +55,7 @@
                     </StackPanel>
                 </TabItem>
 
-                <!-- ---------- карта желательности ---------- -->
+                <!-- карта желательности -->
                 <TabItem Header="Карта">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="8">
@@ -139,7 +139,7 @@
                     </ScrollViewer>
                 </TabItem>
 
-                <!-- ---------- параметры ---------- -->
+                <!-- параметры -->
                 <TabItem Header="Параметры">
                     <DataGrid x:Name="dgParams" Margin="4" AutoGeneratingColumn="Grid_AutoGeneratingColumn" />
                 </TabItem>
@@ -148,7 +148,7 @@
 
         <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
 
-        <!-- ===================== правая панель: результаты ===================== -->
+        <!-- = правая панель: результаты = -->
         <DockPanel Grid.Column="2">
             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                 <TextBlock Text="Вариант:" VerticalAlignment="Center" Margin="0,0,6,0" />
