@@ -59,6 +59,9 @@ jobs:
       - name: Расчёт с Z-кустами
         run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --pad-layout Auto --out ci_results/z --no-pause
 
+      - name: Расчёт с существующими скважинами и жёсткими ограничениями (сравнение)
+        run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --existing data/existing_wells_example.csv --constraints Both --out ci_results/anticollision --no-pause
+
       - name: Расчёт по OpenStreetMap (Overpass API)
         continue-on-error: true
         run: dotnet run --project src/WellPadOptimizer.Cli -c Release --no-build -- --input data/input_mass.json --map-source Osm --osm-mode Overpass --out ci_results/osm --no-pause
