@@ -30,6 +30,7 @@ public static class ParamTable
     private static readonly (string key, string group, string title)[] Known =
     {
         ("MaxOffset", "Ограничения", "Максимальный отход от устья, м"),
+        ("MinOffsetT1", "Ограничения", "Минимальный отход T1 от устья для ГС, м (0 — не проверять)"),
         ("MaxMD", "Ограничения", "Максимальная длина по стволу, м"),
         ("LimitsToBottomHole", "Ограничения", "Ограничения «на забой» (до T3)"),
         ("Dls1", "Ограничения", "Темп первого набора зенита, °/10 м"),
@@ -69,6 +70,7 @@ public static class ParamTable
         ("SoftRadiusFactor", "Оптимизация", "Радиус поиска площадок, доля макс. отхода"),
         ("PenaltyViolation", "Оптимизация", "Штраф за нарушение ограничения, тыс. руб."),
         ("PenaltyOffsetPerM", "Оптимизация", "Штраф за 1 м превышения отхода, тыс. руб."),
+        ("PenaltyMinOffsetPerM", "Оптимизация", "Штраф за 1 м недостающего отхода до T1, тыс. руб."),
         ("PenaltyAzimuthPerDeg", "Оптимизация", "Штраф за 1° превышения разворота, тыс. руб."),
         ("PenaltyMdPerM", "Оптимизация", "Штраф за 1 м превышения MD, тыс. руб."),
         ("SiteGridStep", "Оптимизация", "Шаг сетки площадок-кандидатов, м"),
@@ -76,9 +78,15 @@ public static class ParamTable
         ("RunScenarioWithoutAzimuthTurn", "Оптимизация", "Считать сценарий без ограничения разворота"),
         ("RunPadCountSweep", "Оптимизация", "Считать варианты с заданным числом кустов"),
         ("TrajectoryStep", "Траектории", "Шаг инклинометрии, м"),
-        ("MinSeparation", "Траектории", "Целевое сближение стволов при раскладке, м"),
-        ("AntiCollisionMaxMD", "Траектории", "Глубина проверки сближения при раскладке, м"),
-        ("SeparationWarning", "Траектории", "Порог предупреждения о сближении, м"),
+        ("AcMinSF", "Антистолкновение", "Минимальный коэффициент разделения SF (меньше — нарушение)"),
+        ("AcWarnSF", "Антистолкновение", "SF предупреждения о сближении"),
+        ("AcSurfaceError", "Антистолкновение", "Радиус неопределённости на устье, м"),
+        ("AcErrorPerKm", "Антистолкновение", "Рост радиуса неопределённости на 1000 м MD, м"),
+        ("AntiCollisionMaxMD", "Антистолкновение", "Глубина учёта сближения при раскладке по слотам, м"),
+        ("AcOptimizationStep", "Антистолкновение", "Шаг точек при проверке с существующими скважинами в оптимизации, м"),
+        ("ExistingWellsZShift", "Антистолкновение", "Поправка глубин существующих скважин, м"),
+        ("PenaltyAntiCollision", "Оптимизация", "Штраф за недостающую единицу SF, тыс. руб."),
+        ("PenaltyHard", "Оптимизация", "Максимальный штраф за нарушение в жёстком режиме, тыс. руб."),
         ("PipeWeightAir", "Нагрузки", "Вес 1 м бурильной колонны в воздухе, кН/м"),
         ("MudDensity", "Нагрузки", "Плотность раствора, г/см³"),
         ("SteelDensity", "Нагрузки", "Плотность стали, г/см³"),
@@ -218,7 +226,9 @@ public sealed class WellRow
     [DisplayName("Зенит тангенса, °")] public double? Inc { get; init; }
     [DisplayName("Крюк, тс")] public double? Hook { get; init; }
     [DisplayName("Момент, кН·м")] public double? Torque { get; init; }
-    [DisplayName("Сближение, м")] public double? Sep { get; init; }
+    [DisplayName("Мин. SF")] public double? Sf { get; init; }
+    [DisplayName("Сближение с")] public string AcWith { get; init; }
+    [DisplayName("Расстояние, м")] public double? Sep { get; init; }
     [DisplayName("Бурение, млн руб")] public double? Cost { get; init; }
     [DisplayName("Нарушения")] public string Violations { get; init; }
     [DisplayName("Предупреждения")] public string Warnings { get; init; }
@@ -229,7 +239,7 @@ public sealed class WellRow
     {
         Well = w.Well, Pad = w.Pad, Slot = w.Slot, Offset = Math.Round(w.Offset), Turn = Math.Round(w.AzimuthTurn),
         MdT1 = R(w.MdT1), MdT3 = R(w.MdT3), Hz = Math.Round(w.Horizontal), Inc = R(w.TangentInc, 1),
-        Hook = R(w.HookLoad), Torque = R(w.Torque, 1), Sep = R(w.MinSeparation, 1),
+        Hook = R(w.HookLoad), Torque = R(w.Torque, 1), Sf = R(w.MinSf, 2), AcWith = w.AcWith, Sep = R(w.MinSeparation, 1),
         Cost = w.Cost.HasValue ? Math.Round(w.Cost.Value / 1000, 1) : null,
         Violations = string.Join(", ", w.Violations), Warnings = string.Join(", ", w.Warnings),
     };

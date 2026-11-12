@@ -49,7 +49,12 @@ public sealed class WellResult
     public double? HookLoad { get; set; }
     public double? Torque { get; set; }
     public double? MaxDls { get; set; }
+    /// <summary>Расстояние между осями стволов в точке минимального коэффициента разделения, м.</summary>
     public double? MinSeparation { get; set; }
+    /// <summary>Минимальный коэффициент разделения SF (если ниже AcWarnSF; иначе не заполняется).</summary>
+    public double? MinSf { get; set; }
+    /// <summary>Скважина, с которой достигается минимальный SF («(сущ.)» — существующая).</summary>
+    public string AcWith { get; set; } = "";
     /// <summary>ГС бурится от T3 к T1 (выбрано расчётом).</summary>
     public bool ReversedHorizontal { get; set; }
     public List<string> Violations { get; set; } = new();
@@ -172,6 +177,7 @@ public sealed class Evaluator
                 };
                 var lim = _p.LimitsToBottomHole ? tgt.T3 : tgt.T1;
                 if (Geo.Hypot(lim.N - sn, lim.E - se) > _p.MaxOffset + 1e-6) wr.Violations.Add("отход");
+                if (_p.MinOffsetShortfall(wh, tgt) > 1e-6) wr.Violations.Add("мин. отход");
                 if (_p.UseAzimuthTurn && wr.AzimuthTurn > _p.MaxAzimuthTurn + 1e-6) wr.Violations.Add("разворот");
                 var prof = TrajectoryCalculator.Solve(_p, wh, tgt.T1, tgt.T3);
                 if (prof == null) wr.Violations.Add("профиль");
@@ -195,7 +201,7 @@ public sealed class Evaluator
             }
             res.Pads.Add(pad);
         }
-        AntiCollision(res);
+        CheckAntiCollision(res);
         return res;
     }
 
@@ -238,7 +244,8 @@ public sealed class Evaluator
     {
         if (!_p.CanReverse(t)) return t;
         var r = t.Reversed();
-        double a = Optimizer.SoftCost(_p, wh, t, out _), b = Optimizer.SoftCost(_p, wh, r, out _);
+        double a = Optimizer.SoftCost(_p, wh, t, out int na, _data.Existing), b = Optimizer.SoftCost(_p, wh, r, out int nb, _data.Existing);
+        if (double.IsInfinity(a) && double.IsInfinity(b)) return nb < na ? r : t;   // профиль не строится — по числу нарушений
         return b < a ? r : t;
     }
 
@@ -260,38 +267,50 @@ public sealed class Evaluator
     private (List<int> order, double drill) ImproveSlots(List<int> order, List<(double, double)> pos)
     {
         int n = order.Count;
-        var cache = new Dictionary<(int, int), (Vec3[] pts, double cost)>();
-        (Vec3[] pts, double cost) GetPath(int w, int k)
+        var cache = new Dictionary<(int, int), (double[] md, Vec3[] pts, double cost, int viol)>();
+        (double[] md, Vec3[] pts, double cost, int viol) GetPath(int w, int k)
         {
             if (cache.TryGetValue((w, k), out var v)) return v;
             var wh = new Vec3(pos[k].Item1, pos[k].Item2, 0);
             var t = Oriented(_data.Wells[w], wh);
             var pr = TrajectoryCalculator.Solve(_p, wh, t.T1, t.T3);
-            if (pr == null) v = (null, double.PositiveInfinity);
+            if (pr == null) v = (null, null, double.PositiveInfinity, 9);
             else
             {
                 var sv = TrajectoryCalculator.Survey(_p, pr);
-                v = (sv.Where(x => x.MD > _p.VerticalLength && x.MD <= _p.AntiCollisionMaxMD).Select(x => x.Pos).ToArray(),
-                     TrajectoryCalculator.DrillCost(_p, pr));
+                // нарушения в этом слоте: отход, мин. отход до T1, разворот, MD, сближение с существующими скважинами
+                Optimizer.SoftCost(_p, wh, t, out int nv, _data.Existing);
+                var near = sv.Where(x => x.MD <= _p.AntiCollisionMaxMD).ToList();
+                v = (near.Select(x => x.MD).ToArray(), near.Select(x => x.Pos).ToArray(), TrajectoryCalculator.DrillCost(_p, pr), nv);
             }
             cache[(w, k)] = v;
             return v;
         }
-        (double sep, double negCost) Score(List<int> ord)
+        bool ac = _p.AntiCollisionCheck;
+        (int viol, double sep, double negCost) Score(List<int> ord)
         {
-            double ms = double.PositiveInfinity, cost = 0;
+            double ms = double.PositiveInfinity, cost = 0; int viol = 0;
             for (int i = 0; i < n; i++)
             {
-                var a = GetPath(ord[i], i); cost += a.cost;
-                for (int j = i + 1; j < n; j++) ms = Math.Min(ms, SameMdSeparation(a.pts, GetPath(ord[j], j).pts));
+                var a = GetPath(ord[i], i); cost += a.cost; viol += a.viol;
+                if (!ac) continue;
+                for (int j = i + 1; j < n; j++)
+                {
+                    // коэффициент разделения стволов куста по равным MD (до AntiCollisionMaxMD)
+                    double sf = AntiCollision.SameMdSf(_p, a.md, a.pts, GetPath(ord[j], j).pts);
+                    if (sf < _p.AcMinSF) viol++;
+                    ms = Math.Min(ms, sf);
+                }
             }
-            return (Math.Min(ms, _p.MinSeparation), -cost);
+            return (viol, Math.Min(ms, _p.AcWarnSF), -cost);
         }
-        static bool Better((double s, double c) x, (double s, double c) y) => x.s > y.s || (x.s == y.s && x.c > y.c);
+        // сначала меньше нарушений (отход, мин. отход до T1, разворот, MD, антистолкновение), затем SF, затем стоимость
+        static bool Better((int v, double s, double c) x, (int v, double s, double c) y)
+            => x.v < y.v || (x.v == y.v && (x.s > y.s || (x.s == y.s && x.c > y.c)));
 
         var cur = Score(order);
         order = new List<int>(order);
-        if (n < 2) return (order, -cur.negCost);
+        if (n < 2) return (order, -cur.negCost + cur.viol * _p.PenaltyViolation);
         for (int pass = 0; pass < 4; pass++)
         {
             bool imp = false;
@@ -305,44 +324,49 @@ public sealed class Evaluator
                 }
             if (!imp) break;
         }
-        return (order, -cur.negCost);
+        // нарушения в раскладке учитываются при выборе схемы куста (однорядный / Z)
+        return (order, -cur.negCost + cur.viol * _p.PenaltyViolation);
     }
 
-    private static double SameMdSeparation(Vec3[] a, Vec3[] b)
+    /// <summary>
+    /// Антистолкновение варианта: каждая пара проектных стволов (во всех кустах) по всей длине и каждый ствол
+    /// с существующими скважинами. SF &lt; AcMinSF — нарушение «антистолкновение», SF &lt; AcWarnSF — предупреждение.
+    /// </summary>
+    private void CheckAntiCollision(VariantResult res)
     {
-        if (a == null || b == null || a.Length == 0 || b.Length == 0) return double.PositiveInfinity;
-        int m = Math.Min(a.Length, b.Length); double best = double.PositiveInfinity;
-        for (int i = 0; i < m; i++) best = Math.Min(best, (a[i] - b[i]).Length);
-        return best;
-    }
-
-    /// <summary>Минимальное расстояние между стволами одного куста (ниже вертикального участка).</summary>
-    private void AntiCollision(VariantResult res)
-    {
-        foreach (var grp in res.Wells.GroupBy(w => w.Pad))
+        if (!_p.AntiCollisionCheck) return;
+        var ws = res.Wells;
+        var paths = ws.Select(w => w.Survey.Count > 1 ? WellPath.FromSurvey(w.Well, w.Survey) : null).ToArray();
+        var hits = Enumerable.Repeat(AcHit.None, ws.Count).ToArray();
+        var pairs = new List<(int i, int j)>();
+        for (int i = 0; i < ws.Count; i++)
+            for (int j = i + 1; j < ws.Count; j++)
+                if (paths[i] != null && paths[j] != null) pairs.Add((i, j));
+        var found = new AcHit[pairs.Count];
+        Parallel.For(0, pairs.Count, k => found[k] = AntiCollision.Pair(_p, paths[pairs[k].i], paths[pairs[k].j]));
+        for (int k = 0; k < pairs.Count; k++)
         {
-            var list = grp.ToList();
-            for (int i = 0; i < list.Count; i++)
-                for (int j = i + 1; j < list.Count; j++)
-                {
-                    var a = list[i].Survey.Where(x => x.MD > _p.VerticalLength).Select(x => x.Pos).ToArray();
-                    var b = list[j].Survey.Where(x => x.MD > _p.VerticalLength).Select(x => x.Pos).ToArray();
-                    if (a.Length == 0 || b.Length == 0) continue;
-                    double dm = double.PositiveInfinity;
-                    foreach (var pa in a)
-                        foreach (var pb in b)
-                        {
-                            double dn = pa.N - pb.N; if (Math.Abs(dn) >= dm) continue;
-                            double de = pa.E - pb.E; if (Math.Abs(de) >= dm) continue;
-                            double d = Math.Sqrt(dn * dn + de * de + (pa.Z - pb.Z) * (pa.Z - pb.Z));
-                            if (d < dm) dm = d;
-                        }
-                    foreach (var r in new[] { list[i], list[j] })
-                        r.MinSeparation = r.MinSeparation.HasValue ? Math.Min(r.MinSeparation.Value, dm) : dm;
-                }
+            var h = found[k]; if (double.IsInfinity(h.Sf)) continue;
+            var (i, j) = pairs[k];
+            if (h.Sf < hits[i].Sf) hits[i] = h;
+            if (h.Sf < hits[j].Sf) hits[j] = new AcHit(h.Sf, h.Distance, ws[i].Well, false, h.OtherMd, h.Md);
         }
-        foreach (var w in res.Wells)
-            if (w.MinSeparation.HasValue && w.MinSeparation.Value < _p.SeparationWarning)
-                w.Warnings.Add($"сближение {w.MinSeparation.Value:F1} м");
+        var ex = _data.Existing;
+        if (ex != null && ex.Count > 0)
+        {
+            var eh = new AcHit[ws.Count];
+            Parallel.For(0, ws.Count, i => eh[i] = paths[i] == null ? AcHit.None : ex.Query(paths[i]));
+            for (int i = 0; i < ws.Count; i++) if (eh[i].Sf < hits[i].Sf) hits[i] = eh[i];
+        }
+        for (int i = 0; i < ws.Count; i++)
+        {
+            var h = hits[i]; var w = ws[i];
+            if (double.IsInfinity(h.Sf)) continue;
+            w.MinSf = h.Sf; w.MinSeparation = h.Distance;
+            w.AcWith = h.Other + (h.OtherExisting ? " (сущ.)" : "");
+            string txt = $"SF {h.Sf:F2} с {w.AcWith}: {h.Distance:F1} м на MD {h.Md:F0} м";
+            if (h.Sf < _p.AcMinSF) { w.Violations.Add("антистолкновение"); w.Warnings.Add(txt); }
+            else w.Warnings.Add("сближение: " + txt);
+        }
     }
 }

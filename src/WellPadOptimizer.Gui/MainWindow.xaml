@@ -45,6 +45,23 @@
                             <Button x:Name="btnSaveSettings" Content="Сохранить" Click="BtnSaveSettings_Click" />
                             <Button x:Name="btnSaveSettingsAs" Content="Сохранить как…" Click="BtnSaveSettingsAs_Click" />
                         </StackPanel>
+                        <GroupBox Header="Антистолкновение и учёт ограничений" Margin="0,0,0,10">
+                            <StackPanel>
+                                <CheckBox x:Name="cbAntiCollision" Margin="0,2" Content="Проверять антистолкновение стволов (SF — на вкладке «Параметры»)" />
+                                <CheckBox x:Name="cbExistingWells" Margin="0,2" Content="Учитывать существующие скважины: trajRealWells входного файла и файл ниже" />
+                                <TextBlock Text="Траектории существующих скважин (JSON trajRealWells, Excel или CSV: X, Y, Z или MD, зенит, азимут) — необязательно" Margin="0,6,0,2" TextWrapping="Wrap" />
+                                <DockPanel>
+                                    <Button x:Name="btnExisting" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnExisting_Click" />
+                                    <TextBox x:Name="tbExisting" />
+                                </DockPanel>
+                                <TextBlock Text="Учёт ограничений" Margin="0,8,0,2" />
+                                <ComboBox x:Name="cbConstraintMode" SelectedIndex="0">
+                                    <ComboBoxItem Tag="Soft" Content="Со штрафами: нарушения допускаются, если иначе нет решения" />
+                                    <ComboBoxItem Tag="Hard" Content="Жёсткий: максимальный штраф — нарушения недопустимы" />
+                                    <ComboBoxItem Tag="Both" Content="Оба варианта: со штрафами и сценарий с жёсткими ограничениями" />
+                                </ComboBox>
+                            </StackPanel>
+                        </GroupBox>
                         <TextBlock Text="Папка результатов" FontWeight="SemiBold" />
                         <DockPanel Margin="0,4,0,10">
                             <Button x:Name="btnOut" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnOut_Click" />

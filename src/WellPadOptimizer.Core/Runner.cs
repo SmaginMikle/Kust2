@@ -70,6 +70,21 @@ public sealed class Runner
             }
         }
         _log($"Целей: {data.Wells.Count}, исходных вариантов: {data.Variants.Count}, фактических скважин: {data.RealWells.Count}");
+        // ---- существующие скважины (антистолкновение)
+        data.Existing = null;
+        if (p.AntiCollisionCheck)
+        {
+            var ew = ExistingWells.Collect(p, data, o.InputPath, o.BaseDir, _log);
+            if (ew.Count > 0)
+            {
+                data.Existing = new ExistingWellIndex(p, ew);
+                _log($"Антистолкновение: учитываются {ew.Count} существующих скважин; SF ≥ {p.AcMinSF} (предупреждение при SF < {p.AcWarnSF}), " +
+                     $"радиус неопределённости {p.AcSurfaceError} м + {p.AcErrorPerKm} м на 1000 м MD");
+            }
+            else _log($"Антистолкновение: проверяются проектные стволы между собой (SF ≥ {p.AcMinSF}); существующих скважин нет.");
+        }
+        if (p.HardConstraints) _log($"Режим ограничений: жёсткий — каждое нарушение получает максимальный штраф {p.PenaltyHard:0.#E+0} тыс. руб., решения с нарушениями отбраковываются.");
+        else if (p.CompareHardConstraints) _log("Режим ограничений: со штрафами и дополнительный сценарий с жёсткими ограничениями.");
         _log($"R1 = {p.R1:F0} м, R2 = {p.R2:F0} м (темпы {p.Dls1} и {p.Dls2} °/{p.DlsBaseLength} м); размер куста {p.MinWellsPerPad}–{p.EndMaxWellsPerPad} скв.");
 
         // ---- карта желательности
@@ -122,20 +137,25 @@ public sealed class Runner
 
         // 2) сценарии: с ограничением разворота и без него
         string zTag = LayoutTag(p);
-        var scenarios = new List<(string name, Parameters prm)>
+        string hTag = p.HardConstraints ? HardTag : "";
+        string mainName = (p.UseAzimuthTurn ? $"Разворот ≤{p.MaxAzimuthTurn:0}°" : "Без ограничения разворота") + zTag;
+        var scenarios = new List<(string name, Parameters prm)> { (mainName + hTag, p) };
+        if (p.CompareHardConstraints)
         {
-            ((p.UseAzimuthTurn ? $"Разворот ≤{p.MaxAzimuthTurn:0}°" : "Без ограничения разворота") + zTag, p)
-        };
+            // сравнение: те же параметры, нарушения недопустимы (максимальный штраф)
+            var ph = p.Clone(); ph.ConstraintMode = "Hard";
+            scenarios.Add((mainName + HardTag, ph));
+        }
         if (p.UseAzimuthTurn && p.RunScenarioWithoutAzimuthTurn)
         {
             var p2 = p.Clone(); p2.UseAzimuthTurn = false;
-            scenarios.Add(("Без ограничения разворота" + zTag, p2));
+            scenarios.Add(("Без ограничения разворота" + zTag + hTag, p2));
         }
         if (p.CompareZLayout && (p.PadLayout ?? "Single").Trim().Equals("Single", StringComparison.OrdinalIgnoreCase))
         {
             // сравнение: те же ограничения, кусты от ZMinWells скважин — Z-кусты (2 НДС)
             var pz = p.Clone(); pz.PadLayout = "Z";
-            scenarios.Add(((p.UseAzimuthTurn ? $"Разворот ≤{p.MaxAzimuthTurn:0}°" : "Без ограничения разворота") + LayoutTag(pz), pz));
+            scenarios.Add(((p.UseAzimuthTurn ? $"Разворот ≤{p.MaxAzimuthTurn:0}°" : "Без ограничения разворота") + LayoutTag(pz) + hTag, pz));
         }
         var infeasible = new List<InfeasibleVariant>();
         var sigs = new List<(List<(int, int[])> sig, string layout, VariantResult res)>();
@@ -150,6 +170,16 @@ public sealed class Runner
             }
             o2.BuildCostMatrix();
             _log($"[{scName}] пар площадка–скважина: {o2.FeasiblePairs}, из них без нарушений: {o2.CleanPairs}");
+            string hardWhy = "";
+            if (prm.HardConstraints)
+            {
+                var noSite = o2.WellsWithoutSites();
+                if (noSite.Count > 0)
+                {
+                    hardWhy = $"; при жёстких ограничениях нет допустимого устья для скважин: {string.Join(", ", noSite.Select(i => data.Wells[i].Name))}";
+                    _log($"[{scName}] нет ни одного устья без нарушений для {noSite.Count} скв.: {string.Join(", ", noSite.Select(i => data.Wells[i].Name))}");
+                }
+            }
             var ev = new Evaluator(prm, data, map);
 
             VariantResult AddVariant(string name, string scenario, int K, List<PadAssignment> pads, double est)
@@ -181,7 +211,8 @@ public sealed class Runner
                 if (pads != null) { prevPads = pads; prevEst = est; }
                 if (pads == null)
                 {
-                    infeasible.Add(new InfeasibleVariant(name, scName, K, $"скважины нельзя разбить на кусты по {p.MinWellsPerPad}–{K} скв."));
+                    infeasible.Add(new InfeasibleVariant(name, scName, K, $"скважины нельзя разбить на кусты по {p.MinWellsPerPad}–{K} скв." +
+                        (prm.HardConstraints ? " без нарушений ограничений" + hardWhy : "")));
                     _log($"{name}: нет решения");
                     continue;
                 }
@@ -206,7 +237,7 @@ public sealed class Runner
                     ct.ThrowIfCancellationRequested();
                     string name = $"{scName}; {np} кустов по {p.MinWellsPerPad}–{p.EndMaxWellsPerPad} скв.";
                     var (pads, est) = o2.Optimize(p.EndMaxWellsPerPad, np);
-                    if (pads == null) { infeasible.Add(new InfeasibleVariant(name, scName, p.EndMaxWellsPerPad, "нет разбиения на такое число кустов")); continue; }
+                    if (pads == null) { infeasible.Add(new InfeasibleVariant(name, scName, p.EndMaxWellsPerPad, "нет разбиения на такое число кустов" + (prm.HardConstraints ? " без нарушений ограничений" : ""))); continue; }
                     _ = AddVariant(name, scName + " (число кустов)", p.EndMaxWellsPerPad, pads, est);
                 }
             }
@@ -222,9 +253,16 @@ public sealed class Runner
             Reporting.WriteCsv(outDir, results, p, infeasible);
             throw new InvalidOperationException(
                 $"Ни для одного варианта нет решения: скважины нельзя разбить на кусты по {p.MinWellsPerPad}–{p.EndMaxWellsPerPad} скв. " +
-                "Проверьте минимальное и максимальное число скважин на кусте и максимальный отход.");
+                "Проверьте минимальное и максимальное число скважин на кусте, максимальный и минимальный отход" +
+                (p.HardConstraints ? ", режим жёстких ограничений и антистолкновение." : ".") + "");
         }
 
+        if (p.HardConstraints && !results.Any(r => r.Kind == "opt"))
+            _log("При жёстких ограничениях допустимых вариантов кустования нет (см. причины ниже). Для сравнения можно задать " +
+                 "ConstraintMode = Both — будет показан вариант с минимальным числом нарушений.");
+        if ((p.HardConstraints || p.CompareHardConstraints) && best.Violations > 0 && best.Kind == "opt")
+            _log($"Внимание: в рекомендуемом варианте {best.Violations} скважин/кустов с нарушениями — ограничения, которые проверяются " +
+                 "только при пересчёте варианта (раскладка по слотам, сближение стволов куста, нагрузки), выполнить не удалось.");
         _log(Reporting.FormatSummary(results, best, p));
         foreach (var x in infeasible) _log($"{x.Name}: нет решения — {x.Reason}");
         Reporting.WriteCsv(outDir, results, p, infeasible);
@@ -243,6 +281,8 @@ public sealed class Runner
             Best = best, OutDir = Path.GetFullPath(outDir), ReportPath = Path.GetFullPath(report), Elapsed = sw.Elapsed,
         };
     }
+
+    private const string HardTag = "; жёсткие ограничения";
 
     private static string LayoutTag(Parameters p) => (p.PadLayout ?? "Single").Trim().ToLowerInvariant() switch
     {

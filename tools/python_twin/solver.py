@@ -13,6 +13,7 @@ class P:  # параметры (со скриншота)
     PadLayout = 'Single'; ZMinWells = 12; ZRowSpacing = 50.0; ZRowShift = 0.0; ZFactor = 1.0
     MinWells = 10                       # мин. число скважин на кусте (= начальное значение диапазона)
     SoftRadiusFactor = 1.6              # поиск площадок до 1,6·MaxOffset: нарушения допускаются со штрафом
+    MinOffsetT1 = 200.0; PenMinOffset = 1000.0   # мин. отход T1 от устья для ГС, м; штраф за 1 м
     PenViol = 1.0e6; PenOffset = 1000.0; PenAz = 10000.0; PenMD = 1000.0   # тыс. руб.
     MaxHookLoad = 180.0; MaxTorque = 54.0
     CostNNS = 65.0; CostGS = 55.0
@@ -28,9 +29,49 @@ class P:  # параметры (со скриншота)
     PipeWeightAir = 0.284; MudDensity = 1.20; SteelDensity = 7.85
     FricCased = 0.25; FricOpen = 0.30; PipeRadius = 0.08
     TrajStep = 10.0
-    MinSeparation = 8.0; AcMaxMD = 1000.0
+    AcMaxMD = 1000.0
+    # антистолкновение: SF = D / (r1 + r2), r = AcSurf + AcPerKm * MD / 1000
+    AcCheck = True; AcMinSF = 1.5; AcWarnSF = 2.0; AcSurf = 0.5; AcPerKm = 6.0; AcOptStep = 30.0; PenAC = 1.0e6
+    UseExisting = True
+    ConstraintMode = 'Soft'          # Soft | Hard
 
 def R(dls): return P.DlsBase / (dls * DEG)
+
+def rad(md): return P.AcSurf + P.AcPerKm * np.maximum(md, 0) / 1000.0
+
+class Existing:
+    """существующие скважины: точки (N, E, Z) с MD, KD-дерево"""
+    def __init__(self, real):
+        from scipy.spatial import cKDTree
+        pts = []; md = []; nm = []
+        self.names = []
+        for k, w in enumerate(real):
+            n = min(len(w['X']), len(w['Y']), len(w['AbsoluteDepth']))
+            if n < 2: continue
+            N = w['CoordsY'] + np.array(w['Y'][:n]); E = w['CoordsX'] + np.array(w['X'][:n]); Z = np.array(w['AbsoluteDepth'][:n])
+            M = np.array(w['MeasuredDepth'][:n]) if len(w.get('MeasuredDepth', [])) >= n else np.r_[0, np.cumsum(np.sqrt(np.diff(N)**2 + np.diff(E)**2 + np.diff(Z)**2))]
+            # уплотнение до 5 м (точки вместо отрезков)
+            for i in range(n - 1):
+                L = M[i + 1] - M[i]; m = max(1, int(math.ceil(L / 5.0)))
+                for t in np.arange(m) / m:
+                    pts.append((N[i] + t * (N[i+1] - N[i]), E[i] + t * (E[i+1] - E[i]), Z[i] + t * (Z[i+1] - Z[i]))); md.append(M[i] + t * L); nm.append(len(self.names))
+            pts.append((N[-1], E[-1], Z[-1])); md.append(M[-1]); nm.append(len(self.names))
+            self.names.append(str(w['Name']))
+        self.pts = np.array(pts); self.md = np.array(md); self.nm = np.array(nm)
+        self.tree = cKDTree(self.pts); self.rmax = float(rad(self.md.max())) if len(md) else 0.0
+        self.count = len(self.names)
+    def sf(self, md, pts):
+        """(мин. SF, расстояние, имя, MD) проектного ствола"""
+        rq = rad(md); ub = P.AcWarnSF * (rq.max() + self.rmax)
+        d, idx = self.tree.query(pts, k=12, distance_upper_bound=ub)
+        ok = np.isfinite(d)
+        if not ok.any(): return math.inf, None, '', None
+        ii = np.where(ok, idx, 0)
+        S = np.where(ok, d / (rq[:, None] + rad(self.md[ii])), np.inf)
+        a, b = np.unravel_index(np.argmin(S), S.shape)
+        return float(S[a, b]), float(d[a, b]), self.names[self.nm[ii[a, b]]], float(md[a])
+
+EXIST = None
 
 def pad_build_cost(n):
     if n <= 0: return 0.0
@@ -183,10 +224,15 @@ def az_turn(S, T1, T3):
     d = abs(a1 - a2) % 360
     return min(d, 360 - d)
 
+def min_off_short(S, T1, T3):
+    if P.MinOffsetT1 <= 0 or np.linalg.norm(np.asarray(T3)[:2] - np.asarray(T1)[:2]) < 1e-6: return 0.0
+    return max(0.0, P.MinOffsetT1 - math.hypot(T1[0] - S[0], T1[1] - S[1]))
+
 def pair_check(S, T1, T3):
     """полная проверка ограничений, возвращает (prof|None, причина)"""
     off = math.hypot((T3 if P.LimitsToBottomHole else T1)[0] - S[0], (T3 if P.LimitsToBottomHole else T1)[1] - S[1])
     if off > P.MaxOffset + 1e-6: return None, 'offset'
+    if min_off_short(S, T1, T3) > 1e-6: return None, 'minoffset'
     if P.UseAzTurn and az_turn(S, T1, T3) > P.MaxAzTurn + 1e-6: return None, 'azturn'
     pr = solve_profile(S, T1, T3)
     if pr is None: return None, 'profile'
@@ -201,17 +247,24 @@ def soft_cost(S, T1, T3):
     pen = 0.0; nv = 0
     ex = math.hypot(lim[0] - S[0], lim[1] - S[1]) - P.MaxOffset
     if ex > 1e-6: pen += P.PenViol + P.PenOffset * ex; nv += 1
+    ex = min_off_short(S, T1, T3)
+    if ex > 1e-6: pen += P.PenViol + P.PenMinOffset * ex; nv += 1
     if P.UseAzTurn:
         ex = az_turn(S, T1, T3) - P.MaxAzTurn
         if ex > 1e-6: pen += P.PenViol + P.PenAz * ex; nv += 1
     ex = (pr['mdT3'] if P.LimitsToBottomHole else pr['mdT1']) - P.MaxMD
     if ex > 1e-6: pen += P.PenViol + P.PenMD * ex; nv += 1
+    if EXIST is not None and EXIST.count and P.AcCheck:
+        sv = survey(S, T1, T3, pr, step=P.AcOptStep)
+        sf = EXIST.sf(sv[:, 0], sv[:, 3:6])[0]
+        if P.AcMinSF - sf > 1e-9: pen += P.PenViol + P.PenAC * (P.AcMinSF - sf); nv += 1
     return drill_cost(pr) + pen, nv
 
 def oriented(W, S):
     """(T1, T3, reversed) — для целей с rev выбирается направление ГС с меньшей стоимостью"""
     if not W.get('rev') or np.linalg.norm(W['T3'] - W['T1']) < 1e-6: return W['T1'], W['T3'], False
-    a, _ = soft_cost(S, W['T1'], W['T3']); b, _ = soft_cost(S, W['T3'], W['T1'])
+    a, na = soft_cost(S, W['T1'], W['T3']); b, nb = soft_cost(S, W['T3'], W['T1'])
+    if math.isinf(a) and math.isinf(b): return (W['T3'], W['T1'], True) if nb < na else (W['T1'], W['T3'], False)
     return (W['T3'], W['T1'], True) if b < a else (W['T1'], W['T3'], False)
 
 def drill_cost(pr): return P.CostNNS * pr['mdT1'] + P.CostGS * pr['hz']
@@ -291,6 +344,9 @@ class Problem:
             self.wells.append(dict(i=i, uid=w['uid'], name=f"W{i+1:02d}", T1=T1, T3=T3))
         self.nw = len(self.wells)
         self.real = self.raw.get('trajRealWells', [])
+        global EXIST
+        EXIST = Existing(self.real) if (P.UseExisting and P.AcCheck and self.real) else None
+        if EXIST is not None: print('existing wells', EXIST.count)
 
     def build_sites(self):
         T1 = np.array([w['T1'][:2] for w in self.wells])
@@ -519,6 +575,7 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
             turn = az_turn(S, W['T1'], W['T3'])
             viol = []
             if off > P.MaxOffset + 1e-6: viol.append('отход')
+            if min_off_short(S, W['T1'], W['T3']) > 1e-6: viol.append('мин. отход')
             if P.UseAzTurn and turn > P.MaxAzTurn + 1e-6: viol.append('разворот')
             rec = dict(well=W['name'], uid=W['uid'], pad=pad['name'], whN=float(S[0]), whE=float(S[1]), offset=off, azturn=turn,
                        T1=W['T1'].tolist(), T3=W['T3'].tolist(), hz=float(np.linalg.norm(W['T3'] - W['T1'])))
@@ -537,20 +594,32 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
             rec['viol'] = viol; rec['rev'] = revd
             pad['wells'].append(rec['well']); res['wells'].append(rec)
         res['pads'].append(pad)
-    # антиколлизия внутри куста
-    by_pad = {}
-    for r in res['wells']: by_pad.setdefault(r['pad'], []).append(r)
-    for r in res['wells']: r['min_sep'] = None
-    for lst in by_pad.values():
-        for i in range(len(lst)):
-            for j in range(i + 1, len(lst)):
-                a, b = lst[i].get('survey'), lst[j].get('survey')
-                if a is None or b is None: continue
-                A = a[a[:, 0] > P.VertLen][:, 3:6]; B = b[b[:, 0] > P.VertLen][:, 3:6]
-                if len(A) == 0 or len(B) == 0: continue
-                dm = float(np.sqrt(((A[:, None, :] - B[None, :, :]) ** 2).sum(-1)).min())
-                for r in (lst[i], lst[j]):
-                    r['min_sep'] = dm if r['min_sep'] is None else min(r['min_sep'], dm)
+    # антистолкновение: все пары проектных стволов + существующие скважины
+    wl = res['wells']
+    for r_ in wl: r_['min_sf'] = None; r_['min_sep'] = None; r_['ac_with'] = ''
+    if P.AcCheck:
+        arr = [r_.get('survey') for r_ in wl]
+        best = [(math.inf, None, '', None)] * len(wl)
+        for i1 in range(len(wl)):
+            a = arr[i1]
+            if a is None: continue
+            for j1 in range(i1 + 1, len(wl)):
+                b = arr[j1]
+                if b is None: continue
+                lo = np.maximum(a[:, 3:5].min(0), b[:, 3:5].min(0)); hi = np.minimum(a[:, 3:5].max(0), b[:, 3:5].max(0))
+                if (lo - hi > 80).any(): continue
+                D = np.sqrt(((a[:, None, 3:6] - b[None, :, 3:6]) ** 2).sum(-1))
+                S = D / (rad(a[:, 0])[:, None] + rad(b[:, 0])[None, :])
+                x, y = np.unravel_index(np.argmin(S), S.shape); sf = float(S[x, y])
+                if sf < best[i1][0]: best[i1] = (sf, float(D[x, y]), wl[j1]['well'], float(a[x, 0]))
+                if sf < best[j1][0]: best[j1] = (sf, float(D[x, y]), wl[i1]['well'], float(b[y, 0]))
+            if EXIST is not None and EXIST.count:
+                e = EXIST.sf(a[:, 0], a[:, 3:6])
+                if e[0] < best[i1][0]: best[i1] = (e[0], e[1], e[2] + ' (сущ.)', e[3])
+        for r_, (sf, d, other, md) in zip(wl, best):
+            if sf < P.AcWarnSF:
+                r_['min_sf'] = sf; r_['min_sep'] = d; r_['ac_with'] = other
+                if sf < P.AcMinSF: r_['viol'].append('антистолкновение')
     # итоги
     wl = res['wells']
     res['n_pads'] = len(res['pads']); res['n_wells'] = len(wl)
@@ -566,15 +635,17 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
 def shallow_path(prob, w, S):
     T1, T3, _ = oriented(prob.wells[w], S)
     pr = solve_profile(S, T1, T3)
-    if pr is None: return None, math.inf
+    if pr is None: return None, math.inf, 9
     sv = survey(S, T1, T3, pr)
-    sv = sv[(sv[:, 0] > P.VertLen) & (sv[:, 0] <= P.AcMaxMD)]
-    return sv[:, 3:6], drill_cost(pr)
+    sv = sv[sv[:, 0] <= P.AcMaxMD]
+    _, nv = soft_cost(S, T1, T3)
+    return sv[:, [0, 3, 4, 5]], drill_cost(pr), nv
 
 def min_sep(a, b):
+    """SF по равным MD (a, b: [MD, N, E, Z])"""
     if a is None or b is None or len(a) == 0 or len(b) == 0: return math.inf
-    m = min(len(a), len(b))  # сравнение по одинаковым MD (одинаковая сетка MD)
-    return float(np.sqrt(((a[:m] - b[:m]) ** 2).sum(1)).min())
+    m = min(len(a), len(b))
+    return float((np.sqrt(((a[:m, 1:] - b[:m, 1:]) ** 2).sum(1)) / (2 * rad(a[:m, 0]))).min())
 
 def improve_slots(prob, order, pos):
     """перестановки скважин по слотам pos: максимизация мин. сближения (до AcMaxMD), затем мин. стоимость; -> (order, drill)"""
@@ -584,14 +655,17 @@ def improve_slots(prob, order, pos):
         if (w, k) not in cache: cache[(w, k)] = shallow_path(prob, w, pos[k])
         return cache[(w, k)]
     def score(ordr):
-        ms = math.inf; cost = 0.0
+        ms = math.inf; cost = 0.0; nv = 0
         for k in range(n):
-            pa, cc = path(ordr[k], k); cost += cc
+            pa, cc, vv = path(ordr[k], k); cost += cc; nv += vv
+            if not P.AcCheck: continue
             for j in range(k + 1, n):
-                ms = min(ms, min_sep(pa, path(ordr[j], j)[0]))
-        return (min(ms, P.MinSeparation), -cost)
+                sf = min_sep(pa, path(ordr[j], j)[0])
+                if sf < P.AcMinSF: nv += 1
+                ms = min(ms, sf)
+        return (-nv, min(ms, P.AcWarnSF), -cost)
     cur = score(order); order = list(order)
-    if n < 2: return order, -cur[1]
+    if n < 2: return order, -cur[2] - cur[0] * P.PenViol
     for _ in range(4):
         imp = False
         for i in range(n):
@@ -601,7 +675,7 @@ def improve_slots(prob, order, pos):
                 if sc > cur: cur = sc; imp = True
                 else: order[i], order[j] = order[j], order[i]
         if not imp: break
-    return order, -cur[1]
+    return order, -cur[2] - cur[0] * P.PenViol
 
 def pad_geometry_fixed(terr, center, n, ang):
     S = footprint_samples(); a = ang
@@ -615,6 +689,10 @@ def pad_geometry_fixed(terr, center, n, ang):
     return None, a, vol, vol / 1000 * P.SandCostPer1000, frac, forb
 
 def main(inp, mapf, outdir):
+    P.ConstraintMode = os.environ.get('WPO_MODE', P.ConstraintMode); P.AcCheck = os.environ.get('WPO_AC', '1') == '1'
+    print('mode', P.ConstraintMode, 'anticollision', P.AcCheck)
+    if P.ConstraintMode == 'Hard': P.PenViol = 1.0e12
+    if os.environ.get('WPO_MINWELLS'): P.MinWells = int(os.environ['WPO_MINWELLS']); P.StartMaxWells = max(P.StartMaxWells, P.MinWells)
     os.makedirs(outdir, exist_ok=True)
     t0 = time.time()
     terr = Terrain(mapf); prob = Problem(inp, terr)
@@ -642,6 +720,7 @@ def main(inp, mapf, outdir):
         for K in range(max(P.StartMaxWells, P.MinWells), P.EndMaxWells + 1, P.VariantStep):
             name = f"{sc_name}; {P.MinWells}–{K} скв./куст"
             pads, cost = optimize(prob, sand, K)
+            if pads is not None and P.ConstraintMode == 'Hard' and any(prob.V[int(p['s']), w] > 0 for p in pads for w in p['w']): pads = None
             if pads is None:
                 infeasible.append(dict(name=name, scenario=sc_name, K=K,
                                        reason=f'скважины нельзя разбить на кусты по {P.MinWells}–{K} скв.'))
@@ -660,6 +739,7 @@ def main(inp, mapf, outdir):
         lo, hi = pad_count_range(prob, P.EndMaxWells)
         for npd in range(lo, hi + 1):
             pads, cost = optimize(prob, sand, P.EndMaxWells, n_pads=npd)
+            if pads is not None and P.ConstraintMode == 'Hard' and any(prob.V[int(p['s']), w] > 0 for p in pads for w in p['w']): pads = None
             name = f"{sc_name}; {npd} кустов по {P.MinWells}–{P.EndMaxWells} скв."
             if pads is None:
                 infeasible.append(dict(name=name, scenario=sc_name, K=P.EndMaxWells, reason='нет разбиения на такое число кустов')); continue

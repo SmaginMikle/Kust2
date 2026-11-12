@@ -306,6 +306,7 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
 
   const inReg = (reg, n, e) => e >= reg.bounds[0] && e <= reg.bounds[2] && n >= reg.bounds[1] && n <= reg.bounds[3];
   function padsInRegion(v, reg) { return v.pads.filter((p) => inReg(reg, p.n, p.e)); }
+  function existingInRegion(reg) { return (R.existing || []).filter((w) => w.tr.some((p) => inReg(reg, p[0], p[1]))); }
   function padColors(v, reg) {
     const m = {}; padsInRegion(v, reg).forEach((p, i) => { m[p.name] = { c: css(SLOTS[i % 8]), dash: DASH[Math.floor(i / 8) % 3] }; });
     return m;
@@ -367,6 +368,11 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
     const t = terrainTrace(reg, 2);
     tr3.push({ type: 'surface', x: t.xs, y: t.ys, z: t.z.map((r) => r.map(() => 0)), surfacecolor: t.z, cmin: -0.5, cmax: NCLS - 0.5,
       colorscale: terrainColorscale(), showscale: false, opacity: 0.85, hoverinfo: 'skip', lighting: { ambient: 1, diffuse: 0, specular: 0 } });
+    const exReg = existingInRegion(reg);
+    if (exReg.length) tr3.push({ type: 'scatter3d', mode: 'lines', name: 'существующие скважины',
+      x: exReg.flatMap((w) => w.tr.map((p) => p[1]).concat([null])), y: exReg.flatMap((w) => w.tr.map((p) => p[0]).concat([null])),
+      z: exReg.flatMap((w) => w.tr.map((p) => -p[2]).concat([null])), line: { color: css('--ink-3'), width: 2 },
+      text: exReg.flatMap((w) => w.tr.map(() => w.name).concat([null])), hovertemplate: '%{text} (существующая)<extra></extra>' });
     wells.forEach((w) => {
       const k = colors[w.pad];
       tr3.push({ type: 'scatter3d', mode: 'lines', x: w.tr.map((p) => p[1]), y: w.tr.map((p) => p[0]), z: w.tr.map((p) => -p[2]),
@@ -398,6 +404,9 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
     const tp = terrainTrace(reg, 1);
     const plan = [{ type: 'heatmap', x: tp.xs, y: tp.ys, z: tp.z, zmin: -0.5, zmax: NCLS - 0.5, colorscale: terrainColorscale(), showscale: false,
       customdata: tp.z.map((r) => r.map((c) => terrainNames()[c])), hovertemplate: '%{customdata}<br>E %{x:.0f} · N %{y:.0f}<extra></extra>' }];
+    if (exReg.length) plan.push({ type: 'scatter', mode: 'lines', x: exReg.flatMap((w) => w.tr.map((p) => p[1]).concat([null])),
+      y: exReg.flatMap((w) => w.tr.map((p) => p[0]).concat([null])), line: { color: css('--ink-3'), width: 1, dash: 'dot' },
+      text: exReg.flatMap((w) => w.tr.map(() => w.name).concat([null])), hovertemplate: '%{text} (существующая)<extra></extra>' });
     wells.forEach((w) => {
       const k = colors[w.pad];
       plan.push({ type: 'scatter', mode: 'lines', x: w.tr.map((p) => p[1]), y: w.tr.map((p) => p[0]), line: { color: k.c, width: 1.6, dash: k.dash },
@@ -439,8 +448,8 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
         return `<tr><td class="l"><span class="sw" style="background:${k ? k.c : css('--ink-3')}"></span>${p.name}</td><td>${fmt(p.n, 0)}</td><td>${fmt(p.e, 0)}</td><td>${p.count}</td><td class="l" style="font-family:var(--font-body)">${p.z ? '<span class="pill tag">Z-куст, 2 НДС</span>' : 'однорядный'}</td><td>${fmt(p.nds1 != null ? p.nds1 : p.angle, 0)}${p.nds2 != null ? ' / ' + fmt(p.nds2, 0) : ''}</td><td>${fmt(p.length, 0)}×${fmt(p.width, 0)}</td>` +
           R.terrainClasses.map((t) => `<td>${fmt((p.terrain[t.code] || 0) * 100, 0)}%</td>`).join('') +
           `<td>${fmt(p.sandVolume / 1000)}</td><td>${mln(p.sandCost)}</td><td>${mln(p.buildCost)}</td><td class="l">${p.forbidden ? '<span class="pill bad">✕ запретная зона</span>' : '<span class="pill ok">✓ допустимо</span>'}</td><td class="l">${p.wells.join(' ')}</td></tr>`; }).join('') + '</tbody>';
-    $('t-wells').innerHTML = '<thead><tr><th class="l">Скв.</th><th class="l">Куст</th><th>Слот</th><th>Отход, м</th><th>Разворот, °</th><th>MD до T1</th><th>MD до T3</th><th>ГС, м</th><th>Тангенс, м</th><th>Зенит танг., °</th><th>Крюк, тс</th><th>Момент, кН·м</th><th>Сближение, м</th><th>Бурение, млн</th><th class="l">Проверка</th></tr></thead><tbody>' +
-      v.wells.map((w) => `<tr><td class="l">${w.well}</td><td class="l">${w.pad}</td><td>${w.slot}</td><td>${fmt(w.offset, 0)}</td><td>${fmt(w.azTurn, 0)}</td><td>${fmt(w.mdT1, 0)}</td><td>${fmt(w.mdT3, 0)}</td><td>${fmt(w.hz, 0)}</td><td>${fmt(w.tanLen, 0)}</td><td>${fmt(w.tanInc, 1)}</td><td>${fmt(w.hook, 0)}</td><td>${fmt(w.torque, 1)}</td><td>${fmt(w.minSep, 1)}</td><td>${mln(w.cost, 1)}</td><td class="l">` +
+    $('t-wells').innerHTML = '<thead><tr><th class="l">Скв.</th><th class="l">Куст</th><th>Слот</th><th>Отход, м</th><th>Разворот, °</th><th>MD до T1</th><th>MD до T3</th><th>ГС, м</th><th>Тангенс, м</th><th>Зенит танг., °</th><th>Крюк, тс</th><th>Момент, кН·м</th><th>Мин. SF</th><th class="l">Сближение с</th><th>Бурение, млн</th><th class="l">Проверка</th></tr></thead><tbody>' +
+      v.wells.map((w) => `<tr><td class="l">${w.well}</td><td class="l">${w.pad}</td><td>${w.slot}</td><td>${fmt(w.offset, 0)}</td><td>${fmt(w.azTurn, 0)}</td><td>${fmt(w.mdT1, 0)}</td><td>${fmt(w.mdT3, 0)}</td><td>${fmt(w.hz, 0)}</td><td>${fmt(w.tanLen, 0)}</td><td>${fmt(w.tanInc, 1)}</td><td>${fmt(w.hook, 0)}</td><td>${fmt(w.torque, 1)}</td><td>${w.minSf == null ? '—' : fmt(w.minSf, 2)}</td><td class="l">${w.acWith ? esc(w.acWith) + (w.minSep != null ? ` · ${fmt(w.minSep, 1)} м` : '') : ''}</td><td>${mln(w.cost, 1)}</td><td class="l">` +
         (w.viol.length ? `<span class="pill bad">✕ ${w.viol.join(', ')}</span>` : '<span class="pill ok">✓</span>') + (w.warn.length ? ` <span class="pill warn">! ${w.warn.join(', ')}</span>` : '') + '</td></tr>').join('') + '</tbody>';
   }
 
@@ -472,6 +481,8 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
       ['Отсыпка, млн руб', (v) => v.sandCost / 1000, 1, 1], ['Итого, млн руб', (v) => v.totalCost / 1000, 1, 1],
       ['Скважин с нарушениями', (v) => v.wells.filter((w) => w.viol.length).length, 0, 1],
       ['Макс. отход, м', (v) => Math.max(...v.wells.map((w) => w.offset)), 0, 1],
+      ['Мин. SF (антистолкновение)', (v) => { const g = v.wells.filter((w) => w.minSf != null); return g.length ? Math.min(...g.map((w) => w.minSf)) : NaN; }, 2, 1],
+      ['Мин. отход ГС, м', (v) => { const g = v.wells.filter((w) => w.hz > 1); return g.length ? Math.min(...g.map((w) => w.offset)) : NaN; }, 0, 1],
       ['Макс. MD до T1, м', (v) => Math.max(...v.wells.map((w) => w.mdT1 || 0)), 0, 1],
       ['Макс. нагрузка на крюке, тс', (v) => Math.max(...v.wells.map((w) => w.hook || 0)), 0, 1],
       ['Макс. момент, кН·м', (v) => Math.max(...v.wells.map((w) => w.torque || 0)), 1, 1],
@@ -498,7 +509,9 @@ footer { color: var(--ink-3); font-size: 12px; border-top: 1px solid var(--line)
   $('sel-b').addEventListener('change', renderAB);
 
   $('foot').innerHTML = [
-    `Ограничения: отход до T1 ≤ ${P.MaxOffset} м; MD до T1 ≤ ${P.MaxMD} м; темпы набора ${P.Dls1} и ${P.Dls2} °/10 м; вертикальный участок ${P.VerticalLength} м; разворот по азимуту ≤ ${P.MaxAzimuthTurn}° (${P.UseAzimuthTurn ? 'учитывается' : 'не учитывается'}); нагрузка на крюке ≤ ${P.MaxHookLoad} тс; момент ≤ ${P.MaxTorque} кН·м.`,
+    `Ограничения: отход до T1 ≤ ${P.MaxOffset} м; для ГС отход до T1 ≥ ${P.MinOffsetT1 ?? 0} м; MD до T1 ≤ ${P.MaxMD} м; темпы набора ${P.Dls1} и ${P.Dls2} °/10 м; вертикальный участок ${P.VerticalLength} м; разворот по азимуту ≤ ${P.MaxAzimuthTurn}° (${P.UseAzimuthTurn ? 'учитывается' : 'не учитывается'}); нагрузка на крюке ≤ ${P.MaxHookLoad} тс; момент ≤ ${P.MaxTorque} кН·м; ` +
+      (P.AntiCollisionCheck ? `антистолкновение: SF ≥ ${P.AcMinSF} (предупреждение при SF < ${P.AcWarnSF}), радиус неопределённости ${P.AcSurfaceError} м + ${P.AcErrorPerKm} м на 1000 м MD, существующих скважин: ${P.ExistingWells || 0}; ` : 'антистолкновение не проверяется; ') +
+      `режим ограничений: ${P.ConstraintMode === 'Hard' ? 'жёсткий (нарушения недопустимы)' : P.ConstraintMode === 'Both' ? 'со штрафами + сценарий с жёсткими ограничениями' : 'со штрафами'}.`,
     `Стоимость: ННС ${P.CostNNS} тыс. руб/м, ГС ${P.CostGS} тыс. руб/м, песок ${P.SandCostPer1000m3} тыс. руб за 1000 м³; строительство куста — по группам числа скважин. Размер куста: от ${P.MinWellsPerPad} до ${P.EndMaxWellsPerPad} скважин; перебор верхней границы ${P.StartMaxWellsPerPad}–${P.EndMaxWellsPerPad}.`,
   ].map((s) => `<span>${s}</span>`).join('');
 

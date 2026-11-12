@@ -162,17 +162,17 @@ public static class TableLoader
         }
     }
 
-    private static bool HasZonePrefix(double v)
+    internal static bool HasZonePrefix(double v)
     {
         if (v < 1e6 || v >= 61e6) return false;
         double rem = v - Math.Floor(v / 1e6) * 1e6;
         return rem > 100000 && rem < 900000;
     }
 
-    private static string Norm(string s) => (s ?? "").Trim().Replace(" ", "").Replace(".", "").ToLowerInvariant();
-    private static string Cell(string[] r, int i) => i >= 0 && i < r.Length ? r[i] ?? "" : "";
+    internal static string Norm(string s) => (s ?? "").Trim().Replace(" ", "").Replace(".", "").ToLowerInvariant();
+    internal static string Cell(string[] r, int i) => i >= 0 && i < r.Length ? r[i] ?? "" : "";
 
-    private static double Num(string[] r, int i)
+    internal static double Num(string[] r, int i)
     {
         string s = Cell(r, i).Trim().Replace(" ", "").Replace(' '.ToString(), "").Replace(',', '.');
         return s.Length > 0 && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : double.NaN;
@@ -180,7 +180,7 @@ public static class TableLoader
 
     // ------------------------------------------------------------------ CSV
 
-    private static List<string[]> ReadCsv(string path)
+    public static List<string[]> ReadCsv(string path)
     {
         var bytes = File.ReadAllBytes(path);
         string text;

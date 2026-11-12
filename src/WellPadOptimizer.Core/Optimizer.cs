@@ -12,7 +12,9 @@ public sealed class PadAssignment
 /// Размещение кустов и распределение скважин.
 /// Целевая функция: Σ кусты [строительство(n) + отсыпка(место, n)] + Σ скважины [бурение(место, скважина) + штраф].
 ///  1. Кандидатные площадки — сетка SiteGridStep в радиусе SoftRadiusFactor·MaxOffset от T1.
-///  2. Матрица C[место, скважина] = бурение + штраф за каждое нарушенное ограничение (отход, разворот, MD).
+///  2. Матрица C[место, скважина] = бурение + штраф за каждое нарушенное ограничение (отход, мин. отход до T1 для ГС, разворот, MD,
+///     антистолкновение с существующими скважинами). В жёстком режиме (ConstraintMode = Hard) штраф максимальный
+///     (PenaltyHard), а решения, в которых нарушение всё же осталось, отбраковываются.
 ///     Штраф на порядки больше стоимости бурения, поэтому оптимизатор сначала минимизирует число нарушений,
 ///     затем их величину и только потом затраты. Если профиль не строится — ∞.
 ///  3. Таблица отсыпки Sand[место, n] — по карте желательности, лучшая ориентация, ∞ если задета запретная зона.
@@ -28,6 +30,7 @@ public sealed class Optimizer
     private readonly TerrainMap _map;
     public double[] SiteN, SiteE;
     public double[,] C;           // тыс. руб. (с учётом штрафов)
+    public byte[,] V;             // число нарушенных ограничений пары «площадка–скважина»
     public double[,] Sand;        // тыс. руб.
     public int NSites => SiteN.Length;
     public int NWells => _data.Wells.Count;
@@ -61,22 +64,33 @@ public sealed class Optimizer
     }
 
     /// <summary>Стоимость пары с штрафами; nViol — число нарушенных ограничений.</summary>
-    public static double SoftCost(Parameters p, Vec3 wh, WellTarget w, out int nViol)
+    /// <param name="existing">индекс существующих скважин для антистолкновения (или null)</param>
+    public static double SoftCost(Parameters p, Vec3 wh, WellTarget w, out int nViol, ExistingWellIndex existing = null)
     {
         nViol = 0;
         var prof = TrajectoryCalculator.Solve(p, wh, w.T1, w.T3);
         if (prof == null) { nViol = 9; return double.PositiveInfinity; }
-        double pen = 0;
+        double pen = 0, pv = p.ViolationPenalty;   // в жёстком режиме — максимальный штраф
         var lim = p.LimitsToBottomHole ? w.T3 : w.T1;
         double ex = Geo.Hypot(lim.N - wh.N, lim.E - wh.E) - p.MaxOffset;
-        if (ex > 1e-6) { pen += p.PenaltyViolation + p.PenaltyOffsetPerM * ex; nViol++; }
+        if (ex > 1e-6) { pen += pv + p.PenaltyOffsetPerM * ex; nViol++; }
+        ex = p.MinOffsetShortfall(wh, w);               // ГС «под куст»: T1 ближе MinOffsetT1 к устью
+        if (ex > 1e-6) { pen += pv + p.PenaltyMinOffsetPerM * ex; nViol++; }
         if (p.UseAzimuthTurn)
         {
             ex = TrajectoryCalculator.AzimuthTurn(wh, w.T1, w.T3) - p.MaxAzimuthTurn;
-            if (ex > 1e-6) { pen += p.PenaltyViolation + p.PenaltyAzimuthPerDeg * ex; nViol++; }
+            if (ex > 1e-6) { pen += pv + p.PenaltyAzimuthPerDeg * ex; nViol++; }
         }
         ex = (p.LimitsToBottomHole ? prof.MdT3 : prof.MdT1) - p.MaxMD;
-        if (ex > 1e-6) { pen += p.PenaltyViolation + p.PenaltyMdPerM * ex; nViol++; }
+        if (ex > 1e-6) { pen += pv + p.PenaltyMdPerM * ex; nViol++; }
+        if (existing != null && existing.Count > 0 && p.AntiCollisionCheck)
+        {
+            // антистолкновение с существующими стволами (от центра площадки; точный расчёт — при пересчёте варианта)
+            var sv = TrajectoryCalculator.Survey(p, prof, p.AcOptimizationStep);
+            var hit = existing.Query(sv.Select(x => x.MD).ToArray(), sv.Select(x => new Vec3(x.N, x.E, x.TVD)).ToArray());
+            ex = p.AcMinSF - hit.Sf;
+            if (ex > 1e-9) { pen += pv + p.PenaltyAntiCollision * ex; nViol++; }
+        }
         return TrajectoryCalculator.DrillCost(p, prof) + pen;
     }
 
@@ -84,6 +98,7 @@ public sealed class Optimizer
     {
         int ns = NSites, nw = NWells;
         C = new double[ns, nw];
+        V = new byte[ns, nw];
         int feas = 0, clean = 0;
         double r = SoftRadius;
         Parallel.For(0, nw, j =>
@@ -96,17 +111,31 @@ public sealed class Optimizer
                 C[s, j] = double.PositiveInfinity;
                 if (Geo.Hypot(SiteN[s] - w.T1.N, SiteE[s] - w.T1.E) > r) continue;
                 var wh = new Vec3(SiteN[s], SiteE[s], 0);
-                C[s, j] = SoftCost(_p, wh, w, out int nv);
+                C[s, j] = SoftCost(_p, wh, w, out int nv, _data.Existing);
                 if (_p.CanReverse(w))
                 {
-                    double cr = SoftCost(_p, wh, wRev, out int nvr);
+                    double cr = SoftCost(_p, wh, wRev, out int nvr, _data.Existing);
                     if (cr < C[s, j]) { C[s, j] = cr; nv = nvr; }
                 }
+                V[s, j] = (byte)Math.Min(nv, 255);
                 if (!double.IsInfinity(C[s, j])) { f++; if (nv == 0) c++; }
             }
             Interlocked.Add(ref feas, f); Interlocked.Add(ref clean, c);
         });
         FeasiblePairs = feas; CleanPairs = clean;
+    }
+
+    /// <summary>Скважины, для которых нет ни одной площадки без нарушений ограничений.</summary>
+    public List<int> WellsWithoutSites()
+    {
+        var res = new List<int>();
+        for (int j = 0; j < NWells; j++)
+        {
+            bool any = false;
+            for (int s = 0; s < NSites && !any; s++) any = !double.IsInfinity(C[s, j]) && V[s, j] == 0;
+            if (!any) res.Add(j);
+        }
+        return res;
     }
 
     /// <summary>Точки опробования площадки (s — вдоль ряда устьев, w — поперёк) для максимального куста.</summary>
@@ -243,6 +272,8 @@ public sealed class Optimizer
             for (int p = pMin; p <= pMax; p++)
             {
                 var (pads, c) = OptimizeGroup(g, K, p, small ? g.Count : _p.MinWellsPerPad);
+                // жёсткий режим: решения, в которых осталось хоть одно нарушение, отбраковываются
+                if (pads != null && _p.HardConstraints && pads.Any(pd => pd.Wells.Any(w => V[pd.Site, w] > 0))) pads = null;
                 if (pads != null && !double.IsInfinity(c)) opts[p] = (pads, c);
             }
             if (opts.Count == 0) return (null, double.PositiveInfinity);

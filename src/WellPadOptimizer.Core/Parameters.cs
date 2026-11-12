@@ -47,6 +47,9 @@ public sealed class Parameters
 {
     // --- пользовательские параметры ---
     public double MaxOffset { get; set; } = 1500;          // Максимальный отход от устья, м
+    /// <summary>Минимальный отход точки T1 от устья для горизонтальных скважин, м (0 — не проверять).
+    /// Исключает бурение ГС «под куст». Для наклонно-направленных скважин без ГС не применяется.</summary>
+    public double MinOffsetT1 { get; set; } = 200;
     public double MaxMD { get; set; } = 4000;              // Максимальная длина по стволу, м
     public bool LimitsToBottomHole { get; set; } = false;  // «На забой»: ограничения до T3, иначе до T1
     public double Dls1 { get; set; } = 0.5;                // Темп первого набора, °/DlsBaseLength
@@ -80,6 +83,15 @@ public sealed class Parameters
     public double SoftRadiusFactor { get; set; } = 1.6;
     public double PenaltyViolation { get; set; } = 1.0e6;
     public double PenaltyOffsetPerM { get; set; } = 1000;
+    public double PenaltyMinOffsetPerM { get; set; } = 1000;   // за 1 м недостающего отхода до T1
+
+    /// <summary>Недостающий отход T1 от устья для ГС, м (0 — ограничение выполнено или не применяется).</summary>
+    public double MinOffsetShortfall(Vec3 wh, WellTarget w)
+    {
+        if (MinOffsetT1 <= 0 || !w.HasHorizontal) return 0;
+        double d = Geo.Hypot(w.T1.N - wh.N, w.T1.E - wh.E);
+        return Math.Max(0, MinOffsetT1 - d);
+    }
     public double PenaltyAzimuthPerDeg { get; set; } = 10000;
     public double PenaltyMdPerM { get; set; } = 1000;
     public double MaxHookLoad { get; set; } = 180;         // тс
@@ -194,11 +206,46 @@ public sealed class Parameters
     public double FrictionOpenHole { get; set; } = 0.30;
     public double PipeRadius { get; set; } = 0.08;         // м (по замкам)
 
-    // --- траектории и антиколлизия ---
+    // --- траектории ---
     public double TrajectoryStep { get; set; } = 10;
-    public double MinSeparation { get; set; } = 8;         // цель при раскладке скважин по слотам
+
+    // --- антистолкновение ---
+    /// <summary>Проверять антистолкновение стволов (проектные между собой и с существующими скважинами).</summary>
+    public bool AntiCollisionCheck { get; set; } = true;
+    /// <summary>Минимальный коэффициент разделения SF = D / (r₁ + r₂); меньше — нарушение «антистолкновение».</summary>
+    public double AcMinSF { get; set; } = 1.5;
+    /// <summary>SF, ниже которого выдаётся предупреждение о сближении.</summary>
+    public double AcWarnSF { get; set; } = 2.0;
+    /// <summary>Радиус неопределённости положения ствола на устье, м.</summary>
+    public double AcSurfaceError { get; set; } = 0.5;
+    /// <summary>Рост радиуса неопределённости на 1000 м MD, м.</summary>
+    public double AcErrorPerKm { get; set; } = 6;
+    /// <summary>Шаг точек траектории при проверке с существующими скважинами в ходе оптимизации, м.</summary>
+    public double AcOptimizationStep { get; set; } = 30;
+    /// <summary>Глубина (MD), до которой учитывается сближение при раскладке скважин по слотам куста, м.</summary>
     public double AntiCollisionMaxMD { get; set; } = 1000;
-    public double SeparationWarning { get; set; } = 5;
+    /// <summary>Штраф за недостающую единицу SF (сверх PenaltyViolation), тыс. руб.</summary>
+    public double PenaltyAntiCollision { get; set; } = 1.0e6;
+    /// <summary>Учитывать существующие скважины: trajRealWells входного файла и файл ExistingWellsFile.</summary>
+    public bool UseExistingWells { get; set; } = true;
+    /// <summary>Файл траекторий существующих скважин: JSON (trajRealWells), Excel или CSV (точки X, Y, Z или инклинометрия MD, зенит, азимут).</summary>
+    public string ExistingWellsFile { get; set; } = "";
+    /// <summary>Поправка глубин существующих скважин к системе глубин целей, м (прибавляется к Z).</summary>
+    public double ExistingWellsZShift { get; set; } = 0;
+
+    // --- режим учёта ограничений ---
+    /// <summary>Soft — нарушения допускаются со штрафом; Hard — максимальный штраф: пара «площадка–скважина» с нарушением
+    /// недопустима; Both — основной расчёт со штрафами и дополнительный сценарий с жёсткими ограничениями.</summary>
+    public string ConstraintMode { get; set; } = "Soft";
+    /// <summary>Максимальный штраф за нарушение в жёстком режиме, тыс. руб. (решения с нарушениями затем отбраковываются).</summary>
+    public double PenaltyHard { get; set; } = 1.0e12;
+    /// <summary>Штраф за нарушение для текущего режима.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public double ViolationPenalty => HardConstraints ? PenaltyHard : PenaltyViolation;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HardConstraints => string.Equals((ConstraintMode ?? "").Trim(), "Hard", StringComparison.OrdinalIgnoreCase);
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool CompareHardConstraints => string.Equals((ConstraintMode ?? "").Trim(), "Both", StringComparison.OrdinalIgnoreCase);
 
     // --- набор вариантов ---
     public bool RunScenarioWithoutAzimuthTurn { get; set; } = true;

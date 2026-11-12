@@ -24,7 +24,7 @@ public readonly record struct SurveyPoint(double MD, double Inc, double Az, doub
     public Vec3 Pos => new(N, E, TVD);
 }
 
-public enum CheckResult { Ok, Offset, AzimuthTurn, Profile, MD }
+public enum CheckResult { Ok, Offset, MinOffset, AzimuthTurn, Profile, MD }
 
 public static class TrajectoryCalculator
 {
@@ -94,6 +94,7 @@ public static class TrajectoryCalculator
     {
         var lim = p.LimitsToBottomHole ? w.T3 : w.T1;
         if (Geo.Hypot(lim.N - wh.N, lim.E - wh.E) > p.MaxOffset + 1e-6) return (null, CheckResult.Offset);
+        if (p.MinOffsetShortfall(wh, w) > 1e-6) return (null, CheckResult.MinOffset);
         if (p.UseAzimuthTurn && AzimuthTurn(wh, w.T1, w.T3) > p.MaxAzimuthTurn + 1e-6) return (null, CheckResult.AzimuthTurn);
         var prof = Solve(p, wh, w.T1, w.T3);
         if (prof == null) return (null, CheckResult.Profile);

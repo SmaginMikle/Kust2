@@ -171,6 +171,7 @@ public static class ProjectLoader
         I("FinalMaximumNumberWellsCluster", x => p.EndMaxWellsPerPad = x, "Конечное макс. число скважин на кусте");
         I("SkippingSeedWells", x => p.VariantStep = Math.Max(1, x), "Пропуск вариантов");
         D("MaxWaste", x => p.MaxOffset = x, "Максимальный отход, м");
+        D("MinWaste", x => p.MinOffsetT1 = x, "Минимальный отход до T1 для ГС, м");
         D("MaxTrajLength", x => p.MaxMD = x, "Максимальная длина по стволу, м");
         D("RateFirstSet", x => p.Dls1 = x, "Темп первого набора");
         D("RateSecondSet", x => p.Dls2 = x, "Темп второго набора");

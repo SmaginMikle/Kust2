@@ -74,6 +74,22 @@ public static class PlanRenderer
         canvas.Width = map.NCols; canvas.Height = map.NRows;
         double lw = Math.Max(0.4, 1.6 / Math.Max(zoom, 0.05));
         var padColor = new Dictionary<string, Color>();
+        // существующие скважины — тонкие серые линии
+        if (data?.Existing != null)
+        {
+            var exBrush = new SolidColorBrush(Color.FromRgb(0x6B, 0x72, 0x6E));
+            foreach (var ew in data.Existing.Wells)
+            {
+                var pl = new System.Windows.Shapes.Polyline
+                {
+                    Stroke = exBrush, StrokeThickness = lw * 0.6, StrokeDashArray = new DoubleCollection { 2, 2 },
+                    ToolTip = $"{ew.Name} (существующая), MD {ew.MaxMd:F0} м",
+                };
+                for (int i = 0; i < ew.Count; i += 3) pl.Points.Add(ToPx(map, ew.Pts[i].N, ew.Pts[i].E));
+                pl.Points.Add(ToPx(map, ew.Pts[^1].N, ew.Pts[^1].E));
+                canvas.Children.Add(pl);
+            }
+        }
         if (v != null)
         {
             int k = 0;

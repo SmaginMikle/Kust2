@@ -77,13 +77,13 @@ public static class Reporting
         sb.Clear();
         sb.AppendLine("Вариант;Скважина;UID;Куст;Слот;Устье N;Устье E;T1 N;T1 E;T1 TVD;T3 N;T3 E;T3 TVD;Отход до T1, м;Разворот, °;" +
             "MD до T1, м;MD до T3, м;ГС, м;Тангенс, м;Зенит тангенса, °;Азимут тангенса, °;Макс. ПИ, °/10м;Нагрузка на крюке, тс;Момент, кН·м;" +
-            "Мин. сближение, м;ННС, тыс.руб;ГС, тыс.руб;Бурение, тыс.руб;Направление ГС;Нарушения;Предупреждения");
+            "Мин. SF;Сближение при мин. SF, м;Сближение с;ННС, тыс.руб;ГС, тыс.руб;Бурение, тыс.руб;Направление ГС;Нарушения;Предупреждения");
         foreach (var v in variants.Where(x => x.SameAs == null))
             foreach (var w in v.Wells)
                 sb.AppendLine(string.Join(";", Esc(v.Name), w.Well, w.Uid, w.Pad, w.Slot, F(w.WhN, 2), F(w.WhE, 2),
                     F(w.T1.N, 2), F(w.T1.E, 2), F(w.T1.Z, 2), F(w.T3.N, 2), F(w.T3.E, 2), F(w.T3.Z, 2), F(w.Offset), F(w.AzimuthTurn),
                     F(w.MdT1), F(w.MdT3), F(w.Horizontal), F(w.TangentLength), F(w.TangentInc, 2), F(w.TangentAz, 2), F(w.MaxDls, 2),
-                    F(w.HookLoad), F(w.Torque), F(w.MinSeparation), F(w.CostNNS), F(w.CostGS), F(w.Cost), w.ReversedHorizontal ? "T3→T1" : "T1→T3",
+                    F(w.HookLoad), F(w.Torque), F(w.MinSf, 2), F(w.MinSeparation), w.AcWith, F(w.CostNNS), F(w.CostGS), F(w.Cost), w.ReversedHorizontal ? "T3→T1" : "T1→T3",
                     string.Join(", ", w.Violations), string.Join(", ", w.Warnings)));
         File.WriteAllText(Path.Combine(dir, "wells.csv"), sb.ToString(), Utf8Bom);
 
@@ -126,12 +126,15 @@ public static class Reporting
             }
             j.WriteEndArray();
             j.WriteStartObject("params");
-            j.WriteNumber("MaxOffset", p.MaxOffset); j.WriteNumber("MaxMD", p.MaxMD);
+            j.WriteNumber("MaxOffset", p.MaxOffset); j.WriteNumber("MinOffsetT1", p.MinOffsetT1); j.WriteNumber("MaxMD", p.MaxMD);
             j.WriteNumber("Dls1", p.Dls1); j.WriteNumber("Dls2", p.Dls2); j.WriteNumber("VerticalLength", p.VerticalLength);
             j.WriteBoolean("UseAzimuthTurn", p.UseAzimuthTurn); j.WriteNumber("MaxAzimuthTurn", p.MaxAzimuthTurn);
             j.WriteNumber("MaxHookLoad", p.MaxHookLoad); j.WriteNumber("MaxTorque", p.MaxTorque);
             j.WriteNumber("CostNNS", p.CostNNS); j.WriteNumber("CostGS", p.CostGS); j.WriteNumber("SandCostPer1000m3", p.SandCostPer1000m3);
             j.WriteNumber("MinWellsPerPad", p.MinWellsPerPad); j.WriteNumber("StartMaxWellsPerPad", p.StartMaxWellsPerPad); j.WriteNumber("EndMaxWellsPerPad", p.EndMaxWellsPerPad);
+            j.WriteBoolean("AntiCollisionCheck", p.AntiCollisionCheck); j.WriteNumber("AcMinSF", p.AcMinSF); j.WriteNumber("AcWarnSF", p.AcWarnSF);
+            j.WriteNumber("AcSurfaceError", p.AcSurfaceError); j.WriteNumber("AcErrorPerKm", p.AcErrorPerKm);
+            j.WriteString("ConstraintMode", p.ConstraintMode ?? "Soft"); j.WriteNumber("ExistingWells", data.Existing?.Count ?? 0);
             j.WriteEndObject();
             j.WriteEndObject();
 
@@ -160,6 +163,29 @@ public static class Reporting
             {
                 j.WriteStartObject(); j.WriteString("name", w.Name); j.WriteString("uid", w.Uid);
                 WriteVec(j, "t1", w.T1); WriteVec(j, "t3", w.T3); j.WriteEndObject();
+            }
+            j.WriteEndArray();
+
+            // существующие скважины в пределах участков (прорежено до ~60 м по стволу)
+            j.WriteStartArray("existing");
+            if (data.Existing != null)
+            {
+                var regs = Regions(data, p).ToList();
+                foreach (var ew in data.Existing.Wells)
+                {
+                    if (!ew.Pts.Any(q => regs.Any(g => q.E >= g.e0 && q.E <= g.e1 && q.N >= g.n0 && q.N <= g.n1))) continue;
+                    j.WriteStartObject(); j.WriteString("name", ew.Name);
+                    j.WriteStartArray("tr");
+                    double last = double.NegativeInfinity;
+                    for (int i = 0; i < ew.Count; i++)
+                    {
+                        if (i != ew.Count - 1 && ew.Md[i] - last < 60) continue;
+                        last = ew.Md[i];
+                        j.WriteStartArray(); j.WriteNumberValue(Math.Round(ew.Pts[i].N, 1)); j.WriteNumberValue(Math.Round(ew.Pts[i].E, 1));
+                        j.WriteNumberValue(Math.Round(ew.Pts[i].Z, 1)); j.WriteNumberValue(Math.Round(ew.Md[i], 0)); j.WriteEndArray();
+                    }
+                    j.WriteEndArray(); j.WriteEndObject();
+                }
             }
             j.WriteEndArray();
 
@@ -203,7 +229,7 @@ public static class Reporting
                         Num(j, "hz", w.Horizontal); NumN(j, "mdT1", w.MdT1); NumN(j, "mdT3", w.MdT3); NumN(j, "tanLen", w.TangentLength);
                         NumN(j, "tanInc", w.TangentInc, 2); NumN(j, "tanAz", w.TangentAz, 2); NumN(j, "cost", w.Cost); NumN(j, "costNNS", w.CostNNS);
                         NumN(j, "costGS", w.CostGS); NumN(j, "hook", w.HookLoad); NumN(j, "torque", w.Torque); NumN(j, "maxDls", w.MaxDls, 3);
-                        NumN(j, "minSep", w.MinSeparation);
+                        NumN(j, "minSep", w.MinSeparation); NumN(j, "minSf", w.MinSf, 2); j.WriteString("acWith", w.AcWith ?? "");
                         j.WriteBoolean("rev", w.ReversedHorizontal);
                         j.WriteStartArray("viol"); foreach (var s in w.Violations) j.WriteStringValue(s); j.WriteEndArray();
                         j.WriteStartArray("warn"); foreach (var s in w.Warnings) j.WriteStringValue(s); j.WriteEndArray();

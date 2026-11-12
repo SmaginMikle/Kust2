@@ -76,6 +76,11 @@ public partial class MainWindow : Window
         dgTerrain.ItemsSource = _terrain;
         _paramRows = ParamTable.FromParameters(p);
         dgParams.ItemsSource = _paramRows;
+        cbAntiCollision.IsChecked = p.AntiCollisionCheck;
+        cbExistingWells.IsChecked = p.UseExistingWells;
+        tbExisting.Text = p.ExistingWellsFile ?? "";
+        string mode = (p.ConstraintMode ?? "Soft").Trim();
+        cbConstraintMode.SelectedIndex = mode.Equals("Hard", StringComparison.OrdinalIgnoreCase) ? 1 : mode.Equals("Both", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
     }
 
     /// <summary>Собрать параметры из интерфейса. Возвращает null и показывает ошибки, если значения некорректны.</summary>
@@ -87,6 +92,10 @@ public partial class MainWindow : Window
         p.MapSource = rbMapKin.IsChecked == true ? MapSources.Kin : rbMapOsm.IsChecked == true ? MapSources.Osm
                     : rbMapAsc.IsChecked == true ? MapSources.Asc : MapSources.None;
         p.MapFile = tbMapFile.Text.Trim();
+        p.AntiCollisionCheck = cbAntiCollision.IsChecked == true;
+        p.UseExistingWells = cbExistingWells.IsChecked == true;
+        p.ExistingWellsFile = tbExisting.Text.Trim();
+        p.ConstraintMode = (cbConstraintMode.SelectedItem as ComboBoxItem)?.Tag as string ?? "Soft";
         p.KinRowsFromSouth = cbKinSouth.IsChecked == true;
         p.KinNoDataForbidden = cbKinNoData.IsChecked == true;
         p.KinCodes = _kin.Where(k => k != null).Select(k => new KinCode { Value = k.Value, Code = k.Code, Comment = k.Comment }).ToList();
@@ -137,6 +146,12 @@ public partial class MainWindow : Window
     {
         var d = new OpenFileDialog { Filter = "Входные данные (*.json;*.xlsx;*.csv)|*.json;*.xlsx;*.xlsm;*.csv;*.txt|Проект КИН, input_mass (*.json)|*.json|Таблица Excel (*.xlsx)|*.xlsx;*.xlsm|CSV (*.csv;*.txt)|*.csv;*.txt|Все файлы|*.*", FileName = tbInput.Text };
         if (d.ShowDialog(this) == true) tbInput.Text = d.FileName;
+    }
+
+    private void BtnExisting_Click(object sender, RoutedEventArgs e)
+    {
+        var d = new OpenFileDialog { Filter = "Траектории существующих скважин (*.json;*.xlsx;*.csv)|*.json;*.xlsx;*.xlsm;*.csv;*.txt|Все файлы|*.*" };
+        if (d.ShowDialog(this) == true) tbExisting.Text = d.FileName;
     }
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)

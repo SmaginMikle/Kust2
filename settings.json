@@ -2,6 +2,7 @@
   "_comment": "Параметры расчёта (соответствуют окну настроек). Единицы: м, град, тыс. руб.",
 
   "MaxOffset": 1500,
+  "MinOffsetT1": 200,
   "MaxMD": 4000,
   "LimitsToBottomHole": false,
   "Dls1": 0.5,
@@ -25,8 +26,26 @@
   "SoftRadiusFactor": 1.6,
   "PenaltyViolation": 1000000,
   "PenaltyOffsetPerM": 1000,
+  "PenaltyMinOffsetPerM": 1000,
   "PenaltyAzimuthPerDeg": 10000,
   "PenaltyMdPerM": 1000,
+  "PenaltyAntiCollision": 1000000,
+
+  "_comment_constraints": "ConstraintMode: Soft — нарушения со штрафом; Hard — максимальный штраф (нарушения недопустимы); Both — оба сценария",
+  "ConstraintMode": "Soft",
+  "PenaltyHard": 1000000000000,
+
+  "_comment_ac": "Антистолкновение: SF = D / (r1 + r2), r = AcSurfaceError + AcErrorPerKm * MD / 1000",
+  "AntiCollisionCheck": true,
+  "AcMinSF": 1.5,
+  "AcWarnSF": 2.0,
+  "AcSurfaceError": 0.5,
+  "AcErrorPerKm": 6,
+  "AcOptimizationStep": 30,
+  "AntiCollisionMaxMD": 1000,
+  "UseExistingWells": true,
+  "ExistingWellsFile": "",
+  "ExistingWellsZShift": 0,
   "MaxHookLoad": 180,
   "MaxTorque": 54,
 
@@ -111,9 +130,6 @@
   "PipeRadius": 0.08,
 
   "TrajectoryStep": 10,
-  "MinSeparation": 8,
-  "AntiCollisionMaxMD": 1000,
-  "SeparationWarning": 5,
 
   "RunScenarioWithoutAzimuthTurn": true,
   "RunPadCountSweep": true,

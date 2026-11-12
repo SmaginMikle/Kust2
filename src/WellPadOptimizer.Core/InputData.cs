@@ -27,6 +27,8 @@ public sealed class RealWell
     public double Y { get; init; }   // север
     public double Altitude { get; init; }
     public List<Vec3> Points { get; } = new();
+    /// <summary>MD точек (если заданы во входном файле).</summary>
+    public List<double> Md { get; } = new();
 }
 
 /// <summary>Вариант кустования, заданный во входном файле (устья заданы).</summary>
@@ -52,6 +54,8 @@ public sealed class InputData
     /// <summary>Параметры расчёта, сохранённые в проекте (props), или null.</summary>
     public JsonElement? ProjectProps { get; private set; }
     public string ProjectTitle { get; private set; } = "";
+    /// <summary>Индекс существующих скважин для антистолкновения (строится при расчёте; null — не учитываются).</summary>
+    public ExistingWellIndex Existing { get; set; }
 
     /// <summary>
     /// Чтение формата rndrilling-v3: massiveDataVariants[].trajBuildRequest[] с T1/T3 = [North, East, TVD].
@@ -106,7 +110,15 @@ public sealed class InputData
             vi++;
         }
 
-        if (root.TryGetProperty("trajRealWells", out var rw))
+        if (root.TryGetProperty("trajRealWells", out var rw)) data.RealWells.AddRange(ReadRealWells(rw));
+        return data;
+    }
+
+    /// <summary>Фактические скважины в формате trajRealWells: устье CoordsX (восток), CoordsY (север), смещения X, Y,
+    /// абсолютная глубина AbsoluteDepth (вниз), MeasuredDepth.</summary>
+    public static List<RealWell> ReadRealWells(JsonElement rw)
+    {
+        var list = new List<RealWell>();
         {
             foreach (var w in rw.EnumerateArray())
             {
@@ -121,10 +133,12 @@ public sealed class InputData
                 int n = Math.Min(xs.GetArrayLength(), Math.Min(ys.GetArrayLength(), zs.GetArrayLength()));
                 for (int i = 0; i < n; i++)
                     r.Points.Add(new Vec3(r.Y + ys[i].GetDouble(), r.X + xs[i].GetDouble(), zs[i].GetDouble()));
-                data.RealWells.Add(r);
+                if (w.TryGetProperty("MeasuredDepth", out var mds) && mds.ValueKind == JsonValueKind.Array && mds.GetArrayLength() >= n)
+                    for (int i = 0; i < n; i++) r.Md.Add(mds[i].GetDouble());
+                list.Add(r);
             }
         }
-        return data;
+        return list;
     }
 
     /// <summary>Описание системы координат исходных данных (для журнала).</summary>
