@@ -100,7 +100,7 @@ public static class FixedPadLoader
         int hi = rows.FindIndex(r => r.Select(H).Any(h => h.StartsWith("позиция") || h.StartsWith("xустья") || h.StartsWith("хустья")));
         if (hi < 0) throw new InvalidDataException("не найдена строка заголовков («Позиция в кусте», «X устья», «Y устья»).");
         var hdr = rows[hi].Select(H).ToArray();
-        int Col(Func<string, bool> f) => Array.FindIndex(hdr, f);
+        int Col(Predicate<string> f) => Array.FindIndex(hdr, f);
         int cField = Col(h => h.StartsWith("названиеместорождения") || h == "месторождение");
         int cPad = Col(h => h.StartsWith("номеркуста") || h == "куст");
         int cPos = Col(h => h.StartsWith("позиция"));
