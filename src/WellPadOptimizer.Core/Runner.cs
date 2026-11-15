@@ -108,14 +108,6 @@ public sealed class Runner
         }
         ct.ThrowIfCancellationRequested();
 
-        var opt = new Optimizer(p, data, map);
-        opt.BuildSites();
-        opt.BuildSandTable();
-        _log($"Кандидатных площадок: {opt.NSites}; таблица отсыпки готова ({sw.Elapsed.TotalSeconds:F1} с)");
-        foreach (var g in opt.SmallGroups())
-            _log($"Внимание: обособленная группа из {g.Count} скв. ({string.Join(", ", g.Select(i => data.Wells[i].Name))}) меньше минимального размера куста " +
-                 $"{p.MinWellsPerPad} — для неё допускается один куст меньшего размера.");
-
         var results = new List<VariantResult>();
         var evalMain = new Evaluator(p, data, map);
 
@@ -134,6 +126,36 @@ public sealed class Runner
             results.Add(r);
             _log($"{r.Name}: {r.TotalCost / 1000:F1} млн руб, скважин с нарушениями {r.Wells.Count(w => w.Violations.Count > 0)}");
         }
+
+        // ---- расчёт траекторий по заданным устьям (файлы кустов)
+        VariantResult fixedResult = null;
+        var padFiles = FixedPadLoader.ResolveFiles(p.FixedPadFiles, o.BaseDir, o.InputPath, _log);
+        if (padFiles.Count > 0)
+        {
+            _log($"Расчёт траекторий по заданным устьям: файлов кустов {padFiles.Count}.");
+            var fpads = FixedPadLoader.Load(padFiles, p, data, _log);
+            var plan = new FixedPadPlanner(p, data, _log).Plan(fpads, ct);
+            fixedResult = evalMain.EvaluateFixed("Заданные устья: " + string.Join(", ", fpads.Select(x => x.Name)), plan);
+            results.Add(fixedResult);
+            _log($"{fixedResult.Name}: скважин {fixedResult.WellCount}, {fixedResult.TotalCost / 1000:F1} млн руб, " +
+                 $"скважин с нарушениями {fixedResult.Wells.Count(w => w.Violations.Count > 0)}" +
+                 (fixedResult.Wells.Any(w => w.Violations.Contains("антистолкновение"))
+                     ? $" (антистолкновение: {string.Join(", ", fixedResult.Wells.Where(w => w.Violations.Contains("антистолкновение")).Select(w => w.Well))})" : ""));
+            if (plan.Unassigned.Count > 0 && plan.Unassigned.Count <= 30)
+                _log($"Целей без устья (не рассчитаны): {string.Join(", ", plan.Unassigned)}");
+            else if (plan.Unassigned.Count > 0) _log($"Целей без устья (не рассчитаны): {plan.Unassigned.Count}");
+            if (p.FixedPadsOnly)
+                return Finish(o, sw, data, p, mb, results, fixedResult, new List<InfeasibleVariant>(), outDir);
+        }
+
+        var opt = new Optimizer(p, data, map);
+        opt.BuildSites();
+        opt.BuildSandTable();
+        _log($"Кандидатных площадок: {opt.NSites}; таблица отсыпки готова ({sw.Elapsed.TotalSeconds:F1} с)");
+        foreach (var g in opt.SmallGroups())
+            _log($"Внимание: обособленная группа из {g.Count} скв. ({string.Join(", ", g.Select(i => data.Wells[i].Name))}) меньше минимального размера куста " +
+                 $"{p.MinWellsPerPad} — для неё допускается один куст меньшего размера.");
+
 
         // 2) сценарии: с ограничением разворота и без него
         string zTag = LayoutTag(p);
@@ -263,6 +285,14 @@ public sealed class Runner
         if ((p.HardConstraints || p.CompareHardConstraints) && best.Violations > 0 && best.Kind == "opt")
             _log($"Внимание: в рекомендуемом варианте {best.Violations} скважин/кустов с нарушениями — ограничения, которые проверяются " +
                  "только при пересчёте варианта (раскладка по слотам, сближение стволов куста, нагрузки), выполнить не удалось.");
+        return Finish(o, sw, data, p, mb, results, best, infeasible, outDir);
+    }
+
+    /// <summary>Сводка, таблицы CSV, results.json и report.html.</summary>
+    private RunResult Finish(RunOptions o, Stopwatch sw, InputData data, Parameters p, MapBuildResult mb,
+                             List<VariantResult> results, VariantResult best, List<InfeasibleVariant> infeasible, string outDir)
+    {
+        var map = mb.Map;
         _log(Reporting.FormatSummary(results, best, p));
         foreach (var x in infeasible) _log($"{x.Name}: нет решения — {x.Reason}");
         Reporting.WriteCsv(outDir, results, p, infeasible);
@@ -281,6 +311,7 @@ public sealed class Runner
             Best = best, OutDir = Path.GetFullPath(outDir), ReportPath = Path.GetFullPath(report), Elapsed = sw.Elapsed,
         };
     }
+
 
     private const string HardTag = "; жёсткие ограничения";
 

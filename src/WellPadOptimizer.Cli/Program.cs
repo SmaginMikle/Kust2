@@ -8,6 +8,7 @@ namespace WellPadOptimizer;
 ///                  [--map-source None|Asc|Kin|Osm] [--map файл] [--osm-mode Overpass|File]
 ///                  [--pad-layout Single|Z|Auto] [--project-settings] [--synthetic-map] [--no-pause]
 ///                  [--existing файл] [--constraints Soft|Hard|Both] [--no-anticollision] [--no-existing]
+///                  [--pads "куст1.xlsx;куст2.xlsx" | --pads папка] [--with-optimization]
 /// Входной файл: input_mass.json (rndrilling) или проект кустования КИН (*.json с props / wrappers / assets).
 /// Без ключей карты используется источник из settings.json (по умолчанию — без карты, всё суходол).
 /// </summary>
@@ -76,6 +77,9 @@ public static class Program
         if (!string.IsNullOrWhiteSpace(constraints)) p.ConstraintMode = constraints;
         if (args.Contains("--no-anticollision")) p.AntiCollisionCheck = false;
         if (args.Contains("--no-existing")) p.UseExistingWells = false;
+        string pads = Arg(args, "--pads");
+        if (!string.IsNullOrWhiteSpace(pads)) p.FixedPadFiles = pads;
+        if (args.Contains("--with-optimization")) p.FixedPadsOnly = false;
 
         var runner = new Runner(Console.WriteLine);
         runner.Run(new RunOptions

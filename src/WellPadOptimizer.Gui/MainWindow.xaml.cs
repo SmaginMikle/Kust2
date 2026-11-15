@@ -79,6 +79,8 @@ public partial class MainWindow : Window
         cbAntiCollision.IsChecked = p.AntiCollisionCheck;
         cbExistingWells.IsChecked = p.UseExistingWells;
         tbExisting.Text = p.ExistingWellsFile ?? "";
+        tbPadFiles.Text = p.FixedPadFiles ?? "";
+        cbFixedOnly.IsChecked = p.FixedPadsOnly;
         string mode = (p.ConstraintMode ?? "Soft").Trim();
         cbConstraintMode.SelectedIndex = mode.Equals("Hard", StringComparison.OrdinalIgnoreCase) ? 1 : mode.Equals("Both", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
     }
@@ -95,6 +97,8 @@ public partial class MainWindow : Window
         p.AntiCollisionCheck = cbAntiCollision.IsChecked == true;
         p.UseExistingWells = cbExistingWells.IsChecked == true;
         p.ExistingWellsFile = tbExisting.Text.Trim();
+        p.FixedPadFiles = tbPadFiles.Text.Trim();
+        p.FixedPadsOnly = cbFixedOnly.IsChecked == true;
         p.ConstraintMode = (cbConstraintMode.SelectedItem as ComboBoxItem)?.Tag as string ?? "Soft";
         p.KinRowsFromSouth = cbKinSouth.IsChecked == true;
         p.KinNoDataForbidden = cbKinNoData.IsChecked == true;
@@ -146,6 +150,12 @@ public partial class MainWindow : Window
     {
         var d = new OpenFileDialog { Filter = "Входные данные (*.json;*.xlsx;*.csv)|*.json;*.xlsx;*.xlsm;*.csv;*.txt|Проект КИН, input_mass (*.json)|*.json|Таблица Excel (*.xlsx)|*.xlsx;*.xlsm|CSV (*.csv;*.txt)|*.csv;*.txt|Все файлы|*.*", FileName = tbInput.Text };
         if (d.ShowDialog(this) == true) tbInput.Text = d.FileName;
+    }
+
+    private void BtnPadFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var d = new OpenFileDialog { Multiselect = true, Filter = "Файлы кустов (*.xlsx;*.csv)|*.xlsx;*.xlsm;*.csv|Все файлы|*.*" };
+        if (d.ShowDialog(this) == true) tbPadFiles.Text = string.Join(";", d.FileNames);
     }
 
     private void BtnExisting_Click(object sender, RoutedEventArgs e)

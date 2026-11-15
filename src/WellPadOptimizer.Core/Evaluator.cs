@@ -55,6 +55,12 @@ public sealed class WellResult
     public double? MinSf { get; set; }
     /// <summary>Скважина, с которой достигается минимальный SF («(сущ.)» — существующая).</summary>
     public string AcWith { get; set; } = "";
+    /// <summary>Глубина точки зарезки (конец вертикального участка) по стволу, м.</summary>
+    public double? KopMd { get; set; }
+    /// <summary>Изменения профиля для разведения стволов (заглубление KOP, темп набора).</summary>
+    public string Profile { get; set; } = "";
+    /// <summary>Позиция в кусте по файлу куста (для заданных устьев).</summary>
+    public string SlotLabel { get; set; } = "";
     /// <summary>ГС бурится от T3 к T1 (выбрано расчётом).</summary>
     public bool ReversedHorizontal { get; set; }
     public List<string> Violations { get; set; } = new();
@@ -247,6 +253,83 @@ public sealed class Evaluator
         double a = Optimizer.SoftCost(_p, wh, t, out int na, _data.Existing), b = Optimizer.SoftCost(_p, wh, r, out int nb, _data.Existing);
         if (double.IsInfinity(a) && double.IsInfinity(b)) return nb < na ? r : t;   // профиль не строится — по числу нарушений
         return b < a ? r : t;
+    }
+
+    /// <summary>
+    /// Вариант с заданными устьями (файлы кустов): траектории каждой скважины с её вариантом профиля
+    /// (KOP, темп набора), проверки ограничений, затраты и антистолкновение.
+    /// </summary>
+    public VariantResult EvaluateFixed(string name, FixedPlan plan)
+    {
+        var res = new VariantResult { Name = name, Kind = "fixed", Scenario = "Заданные устья" };
+        for (int pi = 0; pi < plan.Pads.Count; pi++)
+        {
+            var fpd = plan.Pads[pi];
+            var items = plan.Items.Where(x => x.Pad == pi).OrderBy(x => x.Slot).ToList();
+            if (items.Count == 0) continue;
+            int nSlots = fpd.Slots.Count;
+            var pts = fpd.Slots.Select(sl => (sl.N, sl.E)).ToList();
+            double cn = pts.Average(q => q.N), ce = pts.Average(q => q.E);
+            double angle = nSlots >= 2 ? PrincipalAngle(pts) : 0;
+            var fp = Optimizer.EvaluateFootprint(_p, _map, nSlots <= _p.MaxPadCapacity ? _samples : Optimizer.FootprintSamples(_p, nSlots),
+                                                 cn, ce, nSlots, angle);
+            var (L, W) = _p.PadDims(nSlots, false);
+            var pad = new PadResult
+            {
+                Id = pi + 1, Name = fpd.Name, N = cn, E = ce, WellCount = items.Count, Angle = angle, Length = L, Width = W,
+                TerrainFractions = fp.frac, SandVolume = fp.volume, SandCost = fp.cost, BuildCost = _p.PadBuildCost(items.Count),
+                Forbidden = fp.forbidden,
+            };
+            foreach (var it in items)
+            {
+                var sl = fpd.Slots[it.Slot];
+                var opt = plan.Options[it.Option];
+                var pq = opt.Apply(_p);
+                var wr = BuildWell(pq, it.Target, sl.Pos, pad.Name, it.Slot + 1, !ReferenceEquals(it.Target, _data.Wells[it.Well]));
+                wr.SlotLabel = sl.Label;
+                wr.KopMd = pq.VerticalLength;
+                var notes = new List<string>();
+                if (opt.KopShift > 0) notes.Add($"KOP +{opt.KopShift:0} м");
+                if (Math.Abs(opt.Dls1 - _p.Dls1) > 1e-9) notes.Add($"набор {opt.Dls1:0.##}°/{_p.DlsBaseLength:0} м");
+                wr.Profile = string.Join("; ", notes);
+                pad.Wells.Add(wr.Well);
+                res.Wells.Add(wr);
+            }
+            res.Pads.Add(pad);
+        }
+        CheckAntiCollision(res);
+        return res;
+    }
+
+    /// <summary>Расчёт одной скважины от заданного устья с параметрами профиля pq (ограничения — по общим параметрам).</summary>
+    private WellResult BuildWell(Parameters pq, WellTarget tgt, Vec3 wh, string padName, int slot, bool reversed)
+    {
+        var wr = new WellResult
+        {
+            Well = tgt.Name, Uid = tgt.Uid, Pad = padName, Slot = slot, WhN = wh.N, WhE = wh.E,
+            Offset = Geo.Hypot(tgt.T1.N - wh.N, tgt.T1.E - wh.E),
+            AzimuthTurn = TrajectoryCalculator.AzimuthTurn(wh, tgt.T1, tgt.T3),
+            T1 = tgt.T1, T3 = tgt.T3, Horizontal = tgt.HorizontalLength, ReversedHorizontal = reversed,
+        };
+        var lim = _p.LimitsToBottomHole ? tgt.T3 : tgt.T1;
+        if (Geo.Hypot(lim.N - wh.N, lim.E - wh.E) > _p.MaxOffset + 1e-6) wr.Violations.Add("отход");
+        if (_p.MinOffsetShortfall(wh, tgt) > 1e-6) wr.Violations.Add("мин. отход");
+        if (_p.UseAzimuthTurn && wr.AzimuthTurn > _p.MaxAzimuthTurn + 1e-6) wr.Violations.Add("разворот");
+        var prof = TrajectoryCalculator.Solve(pq, wh, tgt.T1, tgt.T3);
+        if (prof == null) { wr.Violations.Add("профиль"); return wr; }
+        var sv = TrajectoryCalculator.Survey(pq, prof);
+        var (hook, tq) = TrajectoryCalculator.TorqueDrag(pq, sv, prof.MdT1);
+        double md = _p.LimitsToBottomHole ? prof.MdT3 : prof.MdT1;
+        if (md > _p.MaxMD + 1e-6) wr.Violations.Add("MD");
+        if (hook > _p.MaxHookLoad) wr.Violations.Add("крюк");
+        if (tq > _p.MaxTorque) wr.Violations.Add("момент");
+        wr.MdT1 = prof.MdT1; wr.MdT3 = prof.MdT3; wr.TangentLength = prof.TangentLength;
+        wr.TangentInc = prof.TangentInclination; wr.TangentAz = prof.TangentAzimuth;
+        wr.CostNNS = _p.CostNNS * prof.MdT1; wr.CostGS = _p.CostGS * prof.Horizontal;
+        wr.Cost = wr.CostNNS + wr.CostGS;
+        wr.HookLoad = hook; wr.Torque = tq; wr.MaxDls = sv.Max(x => x.Dls);
+        wr.Survey = sv;
+        return wr;
     }
 
     private static double PrincipalAngle(List<(double n, double e)> pts)

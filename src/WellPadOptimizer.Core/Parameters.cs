@@ -233,6 +233,27 @@ public sealed class Parameters
     /// <summary>Поправка глубин существующих скважин к системе глубин целей, м (прибавляется к Z).</summary>
     public double ExistingWellsZShift { get; set; } = 0;
 
+    // --- расчёт траекторий по заданным устьям (файлы кустов «Обезличено куст») ---
+    /// <summary>Файлы кустов с заданными устьями: пути через «;» или папка (все .xlsx/.csv в ней). Имя файла — имя куста.</summary>
+    public string FixedPadFiles { get; set; } = "";
+    /// <summary>Только расчёт траекторий по заданным устьям, без подбора кустов (иначе — плюс оптимизация для сравнения).</summary>
+    public bool FixedPadsOnly { get; set; } = true;
+    /// <summary>Скважины, не перечисленные ни в одном файле куста, распределять по свободным слотам.</summary>
+    public bool FixedPadsAssignUnlisted { get; set; } = true;
+    /// <summary>Максимальное заглубление точки зарезки (KOP) при разведении стволов, м (0 — не менять).</summary>
+    public double AcKopShiftMax { get; set; } = 300;
+    /// <summary>Шаг заглубления точки зарезки, м.</summary>
+    public double AcKopShiftStep { get; set; } = 50;
+    /// <summary>Пробовать первый набор с темпом Dls2 при разведении стволов.</summary>
+    public bool AcTryDls2 { get; set; } = true;
+    /// <summary>Предел итераций поиска раскладки и профилей по заданным устьям.</summary>
+    public int FixedPadsMaxIterations { get; set; } = 300;
+    /// <summary>Система глубин целей: Wellhead — TVD от устья (альтитуда не учитывается); SeaLevel — абсолютные глубины,
+    /// устье на высоте альтитуды из файла куста.</summary>
+    public string TargetDepthDatum { get; set; } = "Wellhead";
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool DepthsFromSeaLevel => string.Equals((TargetDepthDatum ?? "").Trim(), "SeaLevel", StringComparison.OrdinalIgnoreCase);
+
     // --- режим учёта ограничений ---
     /// <summary>Soft — нарушения допускаются со штрафом; Hard — максимальный штраф: пара «площадка–скважина» с нарушением
     /// недопустима; Both — основной расчёт со штрафами и дополнительный сценарий с жёсткими ограничениями.</summary>

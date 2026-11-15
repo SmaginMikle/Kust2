@@ -77,13 +77,13 @@ public static class Reporting
         sb.Clear();
         sb.AppendLine("Вариант;Скважина;UID;Куст;Слот;Устье N;Устье E;T1 N;T1 E;T1 TVD;T3 N;T3 E;T3 TVD;Отход до T1, м;Разворот, °;" +
             "MD до T1, м;MD до T3, м;ГС, м;Тангенс, м;Зенит тангенса, °;Азимут тангенса, °;Макс. ПИ, °/10м;Нагрузка на крюке, тс;Момент, кН·м;" +
-            "Мин. SF;Сближение при мин. SF, м;Сближение с;ННС, тыс.руб;ГС, тыс.руб;Бурение, тыс.руб;Направление ГС;Нарушения;Предупреждения");
+            "Мин. SF;Сближение при мин. SF, м;Сближение с;Позиция в кусте;KOP, м;Изменение профиля;ННС, тыс.руб;ГС, тыс.руб;Бурение, тыс.руб;Направление ГС;Нарушения;Предупреждения");
         foreach (var v in variants.Where(x => x.SameAs == null))
             foreach (var w in v.Wells)
                 sb.AppendLine(string.Join(";", Esc(v.Name), w.Well, w.Uid, w.Pad, w.Slot, F(w.WhN, 2), F(w.WhE, 2),
                     F(w.T1.N, 2), F(w.T1.E, 2), F(w.T1.Z, 2), F(w.T3.N, 2), F(w.T3.E, 2), F(w.T3.Z, 2), F(w.Offset), F(w.AzimuthTurn),
                     F(w.MdT1), F(w.MdT3), F(w.Horizontal), F(w.TangentLength), F(w.TangentInc, 2), F(w.TangentAz, 2), F(w.MaxDls, 2),
-                    F(w.HookLoad), F(w.Torque), F(w.MinSf, 2), F(w.MinSeparation), w.AcWith, F(w.CostNNS), F(w.CostGS), F(w.Cost), w.ReversedHorizontal ? "T3→T1" : "T1→T3",
+                    F(w.HookLoad), F(w.Torque), F(w.MinSf, 2), F(w.MinSeparation), w.AcWith, w.SlotLabel, F(w.KopMd), w.Profile, F(w.CostNNS), F(w.CostGS), F(w.Cost), w.ReversedHorizontal ? "T3→T1" : "T1→T3",
                     string.Join(", ", w.Violations), string.Join(", ", w.Warnings)));
         File.WriteAllText(Path.Combine(dir, "wells.csv"), sb.ToString(), Utf8Bom);
 
@@ -230,6 +230,7 @@ public static class Reporting
                         NumN(j, "tanInc", w.TangentInc, 2); NumN(j, "tanAz", w.TangentAz, 2); NumN(j, "cost", w.Cost); NumN(j, "costNNS", w.CostNNS);
                         NumN(j, "costGS", w.CostGS); NumN(j, "hook", w.HookLoad); NumN(j, "torque", w.Torque); NumN(j, "maxDls", w.MaxDls, 3);
                         NumN(j, "minSep", w.MinSeparation); NumN(j, "minSf", w.MinSf, 2); j.WriteString("acWith", w.AcWith ?? "");
+                        NumN(j, "kop", w.KopMd); j.WriteString("profile", w.Profile ?? ""); j.WriteString("slotLabel", w.SlotLabel ?? "");
                         j.WriteBoolean("rev", w.ReversedHorizontal);
                         j.WriteStartArray("viol"); foreach (var s in w.Violations) j.WriteStringValue(s); j.WriteEndArray();
                         j.WriteStartArray("warn"); foreach (var s in w.Warnings) j.WriteStringValue(s); j.WriteEndArray();

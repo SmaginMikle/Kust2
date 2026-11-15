@@ -31,6 +31,16 @@
   "PenaltyMdPerM": 1000,
   "PenaltyAntiCollision": 1000000,
 
+  "_comment_fixed": "Траектории по заданным устьям: FixedPadFiles — файлы кустов (через ;) или папка; имя файла — имя куста",
+  "FixedPadFiles": "",
+  "FixedPadsOnly": true,
+  "FixedPadsAssignUnlisted": true,
+  "AcKopShiftMax": 300,
+  "AcKopShiftStep": 50,
+  "AcTryDls2": true,
+  "FixedPadsMaxIterations": 300,
+  "TargetDepthDatum": "Wellhead",
+
   "_comment_constraints": "ConstraintMode: Soft — нарушения со штрафом; Hard — максимальный штраф (нарушения недопустимы); Both — оба сценария",
   "ConstraintMode": "Soft",
   "PenaltyHard": 1000000000000,

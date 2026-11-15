@@ -45,6 +45,16 @@
                             <Button x:Name="btnSaveSettings" Content="Сохранить" Click="BtnSaveSettings_Click" />
                             <Button x:Name="btnSaveSettingsAs" Content="Сохранить как…" Click="BtnSaveSettingsAs_Click" />
                         </StackPanel>
+                        <GroupBox Header="Траектории по заданным устьям (файлы кустов)" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="Файлы кустов «Обезличено куст» (имя файла — имя куста): пути через «;» или папка" TextWrapping="Wrap" Margin="0,0,0,2" />
+                                <DockPanel>
+                                    <Button x:Name="btnPadFiles" DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Click="BtnPadFiles_Click" />
+                                    <TextBox x:Name="tbPadFiles" />
+                                </DockPanel>
+                                <CheckBox x:Name="cbFixedOnly" Margin="0,6,0,2" Content="Только траектории по заданным устьям (без подбора кустов)" />
+                            </StackPanel>
+                        </GroupBox>
                         <GroupBox Header="Антистолкновение и учёт ограничений" Margin="0,0,0,10">
                             <StackPanel>
                                 <CheckBox x:Name="cbAntiCollision" Margin="0,2" Content="Проверять антистолкновение стволов (SF — на вкладке «Параметры»)" />
