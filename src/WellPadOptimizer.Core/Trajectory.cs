@@ -1,7 +1,7 @@
 namespace WellPadOptimizer;
 
 /// <summary>
-/// Проектный профиль: вертикаль (VerticalLength) → первый набор (R1) → тангенциальный участок →
+/// Проектный профиль: вертикаль (VerticalLength) → первый набор (R1) → тангенциальный участок (интервал под ГНО) →
 /// второй набор/разворот (R2) с выходом в T1 по направлению T1→T3 → горизонтальный участок T1→T3.
 /// Для целей без горизонтального участка (T1 = T3) — J-профиль: вертикаль → набор → тангенс до T1.
 /// </summary>
@@ -13,6 +13,10 @@ public sealed class Profile
     public Vec3? TargetDir;        // направление T1→T3 (null для ННС без ГС)
     public double Theta1, Theta2;  // углы искривления на участках набора, рад
     public double TangentLength;
+    /// <summary>Радиусы наборов профиля (первый может быть увеличен по темпу для интервала ГНО), м.</summary>
+    public double R1, R2;
+    /// <summary>Фактический темп первого набора, °/DlsBaseLength.</summary>
+    public double Dls1;
     public double MdT1, MdT3, Horizontal;
     public double TangentInclination => Math.Acos(Geo.Clamp1(TangentDir.Z)) / Geo.Deg;
     public double TangentAzimuth => Geo.Azimuth(TangentDir.N, TangentDir.E);
@@ -24,7 +28,7 @@ public readonly record struct SurveyPoint(double MD, double Inc, double Az, doub
     public Vec3 Pos => new(N, E, TVD);
 }
 
-public enum CheckResult { Ok, Offset, MinOffset, AzimuthTurn, Profile, MD }
+public enum CheckResult { Ok, Offset, MinOffset, AzimuthTurn, Profile, MD, Gno }
 
 public static class TrajectoryCalculator
 {
@@ -36,7 +40,25 @@ public static class TrajectoryCalculator
     /// </summary>
     public static Profile Solve(Parameters p, Vec3 wellhead, Vec3 t1, Vec3 t3)
     {
-        double r1 = p.R1, r2 = p.R2;
+        var prof = SolveWith(p, p.R1, wellhead, t1, t3);
+        // интервал под ГНО: если тангенс короче GnoInterval (или профиль не строится) и это разрешено —
+        // увеличиваем темп первого набора: тангенс удлиняется
+        if (!p.GnoAdjustBuild || p.GnoInterval <= 0 || (prof != null && p.GnoShortfall(prof) <= 1e-6)) return prof;
+        double dMax = p.GnoMaxDls1 > 0 ? p.GnoMaxDls1 : p.Dls2;
+        if (dMax <= p.Dls1 + 1e-9) return prof;
+        const int steps = 12;
+        for (int k = 1; k <= steps; k++)
+        {
+            double dls = p.Dls1 + (dMax - p.Dls1) * k / steps;
+            var q = SolveWith(p, p.DlsBaseLength / (dls * Math.PI / 180.0), wellhead, t1, t3);
+            if (q != null && p.GnoShortfall(q) <= 1e-6) return q;
+        }
+        return prof;
+    }
+
+    private static Profile SolveWith(Parameters p, double r1, Vec3 wellhead, Vec3 t1, Vec3 t3)
+    {
+        double r2 = p.R2;
         var v = Vec3.Down;
         var kop = new Vec3(wellhead.N, wellhead.E, wellhead.Z + p.VerticalLength);
         double hz = (t3 - t1).Length;
@@ -63,6 +85,7 @@ public static class TrajectoryCalculator
         {
             Wellhead = wellhead, Kop = kop, TangentDir = d, TargetDir = t, Theta1 = th1, Theta2 = th2,
             TangentLength = Math.Max(L, 0), MdT1 = mdT1, MdT3 = mdT1 + hz, Horizontal = hz,
+            R1 = r1, R2 = r2, Dls1 = p.DlsBaseLength / r1 * 180.0 / Math.PI,
         };
 
         void Ends(Vec3 dd, out Vec3 a1, out Vec3 a2, out double q1, out double q2, out bool fail)
@@ -100,6 +123,7 @@ public static class TrajectoryCalculator
         if (prof == null) return (null, CheckResult.Profile);
         double md = p.LimitsToBottomHole ? prof.MdT3 : prof.MdT1;
         if (md > p.MaxMD + 1e-6) return (null, CheckResult.MD);
+        if (p.GnoShortfall(prof) > 1e-6) return (null, CheckResult.Gno);
         return (prof, CheckResult.Ok);
     }
 
@@ -116,11 +140,11 @@ public static class TrajectoryCalculator
         var cur = pr.Wellhead; double md = 0;
         raw.Add((0, cur, v));
         Line(raw, ref cur, ref md, v, p.VerticalLength, step);
-        Arc(raw, ref cur, ref md, v, pr.TangentDir, p.R1, step);
+        Arc(raw, ref cur, ref md, v, pr.TangentDir, pr.R1 > 0 ? pr.R1 : p.R1, step);
         Line(raw, ref cur, ref md, pr.TangentDir, pr.TangentLength, step);
         if (pr.TargetDir.HasValue)
         {
-            Arc(raw, ref cur, ref md, pr.TangentDir, pr.TargetDir.Value, p.R2, step);
+            Arc(raw, ref cur, ref md, pr.TangentDir, pr.TargetDir.Value, pr.R2 > 0 ? pr.R2 : p.R2, step);
             Line(raw, ref cur, ref md, pr.TargetDir.Value, pr.Horizontal, step);
         }
         var res = new List<SurveyPoint>(raw.Count);

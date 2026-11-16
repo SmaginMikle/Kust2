@@ -30,6 +30,9 @@ public static class ParamTable
     private static readonly (string key, string group, string title)[] Known =
     {
         ("MaxOffset", "Ограничения", "Максимальный отход от устья, м"),
+        ("GnoInterval", "Ограничения", "Интервал под установку ГНО (прямолинейный участок), м MD; 0 — не учитывать"),
+        ("GnoAdjustBuild", "Ограничения", "Разрешить темп первого набора выше Dls1 для интервала ГНО"),
+        ("GnoMaxDls1", "Ограничения", "Предельный темп первого набора для интервала ГНО, °/10 м (0 — Dls2)"),
         ("MinOffsetT1", "Ограничения", "Минимальный отход T1 от устья для ГС, м (0 — не проверять)"),
         ("MaxMD", "Ограничения", "Максимальная длина по стволу, м"),
         ("LimitsToBottomHole", "Ограничения", "Ограничения «на забой» (до T3)"),
@@ -91,6 +94,7 @@ public static class ParamTable
         ("FixedPadsAssignUnlisted", "Заданные устья", "Распределять скважины без куста по кустам без списка скважин"),
         ("FixedPadsMaxIterations", "Заданные устья", "Предел итераций разведения стволов"),
         ("TargetDepthDatum", "Заданные устья", "Глубины целей: Wellhead — от устья, SeaLevel — абсолютные (учитывается альтитуда)"),
+        ("PenaltyGnoPerM", "Оптимизация", "Штраф за 1 м недостающего интервала ГНО, тыс. руб."),
         ("PenaltyAntiCollision", "Оптимизация", "Штраф за недостающую единицу SF, тыс. руб."),
         ("PenaltyHard", "Оптимизация", "Максимальный штраф за нарушение в жёстком режиме, тыс. руб."),
         ("PipeWeightAir", "Нагрузки", "Вес 1 м бурильной колонны в воздухе, кН/м"),
@@ -229,6 +233,7 @@ public sealed class WellRow
     [DisplayName("MD до T1, м")] public double? MdT1 { get; init; }
     [DisplayName("MD до T3, м")] public double? MdT3 { get; init; }
     [DisplayName("ГС, м")] public double Hz { get; init; }
+    [DisplayName("Тангенс (ГНО), м")] public double? Tan { get; init; }
     [DisplayName("Зенит тангенса, °")] public double? Inc { get; init; }
     [DisplayName("Крюк, тс")] public double? Hook { get; init; }
     [DisplayName("Момент, кН·м")] public double? Torque { get; init; }
@@ -244,7 +249,7 @@ public sealed class WellRow
     public static WellRow From(WellResult w) => new()
     {
         Well = w.Well, Pad = w.Pad, Slot = w.Slot, Offset = Math.Round(w.Offset), Turn = Math.Round(w.AzimuthTurn),
-        MdT1 = R(w.MdT1), MdT3 = R(w.MdT3), Hz = Math.Round(w.Horizontal), Inc = R(w.TangentInc, 1),
+        MdT1 = R(w.MdT1), MdT3 = R(w.MdT3), Hz = Math.Round(w.Horizontal), Tan = R(w.TangentLength), Inc = R(w.TangentInc, 1),
         Hook = R(w.HookLoad), Torque = R(w.Torque, 1), Sf = R(w.MinSf, 2), AcWith = w.AcWith, Sep = R(w.MinSeparation, 1),
         Cost = w.Cost.HasValue ? Math.Round(w.Cost.Value / 1000, 1) : null,
         Violations = string.Join(", ", w.Violations), Warnings = string.Join(", ", w.Warnings),

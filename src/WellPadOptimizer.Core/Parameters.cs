@@ -209,6 +209,21 @@ public sealed class Parameters
     // --- траектории ---
     public double TrajectoryStep { get; set; } = 10;
 
+    // --- интервал под установку ГНО ---
+    /// <summary>Интервал под установку ГНО, м по стволу: прямолинейный (тангенциальный) участок над пластом не короче
+    /// этой длины. 0 — не учитывать.</summary>
+    public double GnoInterval { get; set; } = 100;
+    /// <summary>Разрешить увеличивать темп первого набора сверх Dls1 (до GnoMaxDls1), если тангенс короче интервала ГНО
+    /// или профиль с темпом Dls1 не строится. По умолчанию выключено: темп Dls1 — технологическое ограничение.</summary>
+    public bool GnoAdjustBuild { get; set; } = false;
+    /// <summary>Предельный темп первого набора при подборе интервала ГНО, °/DlsBaseLength (0 — равен Dls2).</summary>
+    public double GnoMaxDls1 { get; set; } = 0;
+    /// <summary>Штраф за 1 м недостающего интервала ГНО (сверх PenaltyViolation), тыс. руб.</summary>
+    public double PenaltyGnoPerM { get; set; } = 1000;
+
+    /// <summary>Недостающая длина интервала под ГНО для профиля, м (0 — требование выполнено или не задано).</summary>
+    public double GnoShortfall(Profile pr) => GnoInterval > 0 && pr != null ? Math.Max(0, GnoInterval - pr.TangentLength) : 0;
+
     // --- антистолкновение ---
     /// <summary>Проверять антистолкновение стволов (проектные между собой и с существующими скважинами).</summary>
     public bool AntiCollisionCheck { get; set; } = true;

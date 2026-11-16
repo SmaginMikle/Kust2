@@ -185,9 +185,21 @@ def site_sand_table(terr, sites, nmax):
 def unit(v): return v / np.linalg.norm(v)
 
 def solve_profile(S, T1, T3):
+    """профиль с учётом интервала под ГНО: при коротком тангенсе — больший темп первого набора"""
+    pr = _solve(S, T1, T3, R(P.Dls1))
+    G = getattr(P, 'GnoInterval', 0)
+    if G <= 0 or not getattr(P, 'GnoAdjust', False) or (pr is not None and pr['L'] >= G - 1e-6): return pr
+    dmax = P.Dls2
+    for k in range(1, 13):
+        dls = P.Dls1 + (dmax - P.Dls1) * k / 12
+        q = _solve(S, T1, T3, R(dls))
+        if q is not None and q['L'] >= G - 1e-6: return q
+    return pr
+
+def _solve(S, T1, T3, R1):
     """S=(N,E,0). Профиль: вертикаль -> набор1 -> тангенс -> набор2 (выход в T1 по направлению T1->T3).
        Возвращает dict или None."""
-    R1, R2 = R(P.Dls1), R(P.Dls2)
+    R2 = R(P.Dls2)
     v = np.array([0, 0, 1.0]); K = np.array([S[0], S[1], P.VertLen])
     hz = np.linalg.norm(T3 - T1)
     t = unit(T3 - T1) if hz > 1e-6 else None
@@ -213,7 +225,7 @@ def solve_profile(S, T1, T3):
     L = (P2 - P1) @ d
     if L < -1e-6 or d[2] < -1e-9: return None
     md1 = P.VertLen + R1 * th1 + L + R2 * th2
-    return dict(d=d, th1=th1, th2=th2, L=max(L, 0), P1=P1, P2=P2, K=K, mdT1=md1, mdT3=md1 + hz, hz=hz, t=t,
+    return dict(d=d, th1=th1, th2=th2, L=max(L, 0), P1=P1, P2=P2, K=K, mdT1=md1, mdT3=md1 + hz, hz=hz, t=t, R1=R1,
                 inc_t=math.degrees(th1))
 
 def az_of(dn, de): return (math.degrees(math.atan2(de, dn)) + 360) % 360
@@ -254,6 +266,8 @@ def soft_cost(S, T1, T3):
         if ex > 1e-6: pen += P.PenViol + P.PenAz * ex; nv += 1
     ex = (pr['mdT3'] if P.LimitsToBottomHole else pr['mdT1']) - P.MaxMD
     if ex > 1e-6: pen += P.PenViol + P.PenMD * ex; nv += 1
+    ex = getattr(P, 'GnoInterval', 0) - pr['L'] if getattr(P, 'GnoInterval', 0) > 0 else 0
+    if ex > 1e-6: pen += P.PenViol + 1000.0 * ex; nv += 1
     if EXIST is not None and EXIST.count and P.AcCheck:
         sv = survey(S, T1, T3, pr, step=P.AcOptStep)
         sf = EXIST.sf(sv[:, 0], sv[:, 3:6])[0]
@@ -295,7 +309,7 @@ def survey(S, T1, T3, pr, step=None):
     v = np.array([0, 0, 1.0]); S3 = np.array([S[0], S[1], 0.0])
     pts = [(0.0, S3, v)]
     seg, Pc, md = line_points(S3, v, P.VertLen, 0.0, step); pts += seg
-    seg, Pc, md = arc_points(Pc, v, pr['d'], R(P.Dls1), md, step); pts += seg
+    seg, Pc, md = arc_points(Pc, v, pr['d'], pr.get('R1', R(P.Dls1)), md, step); pts += seg
     seg, Pc, md = line_points(Pc, pr['d'], pr['L'], md, step); pts += seg
     if pr['t'] is not None:
         seg, Pc, md = arc_points(Pc, pr['d'], pr['t'], R(P.Dls2), md, step); pts += seg
@@ -586,6 +600,7 @@ def evaluate(prob, pads_in, name, kind, K=None, fixed_wh=None):
                 hook, tq = torque_drag(sv, pr['mdT1'])
                 md = pr['mdT3'] if P.LimitsToBottomHole else pr['mdT1']
                 if md > P.MaxMD + 1e-6: viol.append('MD')
+                if getattr(P, 'GnoInterval', 0) > 0 and pr['L'] < P.GnoInterval - 1e-6: viol.append('ГНО')
                 if hook > P.MaxHookLoad: viol.append('крюк')
                 if tq > P.MaxTorque: viol.append('момент')
                 rec.update(mdT1=pr['mdT1'], mdT3=pr['mdT3'], tangent=pr['L'], inc_tangent=pr['inc_t'],
@@ -692,6 +707,7 @@ def main(inp, mapf, outdir):
     P.ConstraintMode = os.environ.get('WPO_MODE', P.ConstraintMode); P.AcCheck = os.environ.get('WPO_AC', '1') == '1'
     print('mode', P.ConstraintMode, 'anticollision', P.AcCheck)
     if P.ConstraintMode == 'Hard': P.PenViol = 1.0e12
+    P.GnoInterval = float(os.environ.get('WPO_GNO', '100'))
     if os.environ.get('WPO_MINWELLS'): P.MinWells = int(os.environ['WPO_MINWELLS']); P.StartMaxWells = max(P.StartMaxWells, P.MinWells)
     os.makedirs(outdir, exist_ok=True)
     t0 = time.time()

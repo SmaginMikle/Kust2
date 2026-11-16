@@ -3,6 +3,10 @@
 
   "MaxOffset": 1500,
   "MinOffsetT1": 200,
+  "_gno": "Интервал под установку ГНО: прямолинейный участок над пластом не короче GnoInterval (м, MD); 0 — не учитывать",
+  "GnoInterval": 100,
+  "GnoAdjustBuild": false,
+  "GnoMaxDls1": 0,
   "MaxMD": 4000,
   "LimitsToBottomHole": false,
   "Dls1": 0.5,
@@ -29,6 +33,7 @@
   "PenaltyMinOffsetPerM": 1000,
   "PenaltyAzimuthPerDeg": 10000,
   "PenaltyMdPerM": 1000,
+  "PenaltyGnoPerM": 1000,
   "PenaltyAntiCollision": 1000000,
 
   "_comment_fixed": "Траектории по заданным устьям: FixedPadFiles — файлы кустов (через ;) или папка; имя файла — имя куста",

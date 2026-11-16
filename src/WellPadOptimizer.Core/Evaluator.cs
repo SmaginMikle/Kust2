@@ -193,6 +193,7 @@ public sealed class Evaluator
                     var (hook, tq) = TrajectoryCalculator.TorqueDrag(_p, sv, prof.MdT1);
                     double md = _p.LimitsToBottomHole ? prof.MdT3 : prof.MdT1;
                     if (md > _p.MaxMD + 1e-6) wr.Violations.Add("MD");
+                    GnoCheck(wr, prof);
                     if (hook > _p.MaxHookLoad) wr.Violations.Add("крюк");
                     if (tq > _p.MaxTorque) wr.Violations.Add("момент");
                     wr.MdT1 = prof.MdT1; wr.MdT3 = prof.MdT3; wr.TangentLength = prof.TangentLength;
@@ -301,6 +302,15 @@ public sealed class Evaluator
         return res;
     }
 
+    /// <summary>Интервал под ГНО: нарушение «ГНО», если тангенс короче GnoInterval; сведения об изменённом темпе набора.</summary>
+    private void GnoCheck(WellResult wr, Profile prof)
+    {
+        double sh = _p.GnoShortfall(prof);
+        if (sh > 1e-6) { wr.Violations.Add("ГНО"); wr.Warnings.Add($"интервал под ГНО {prof.TangentLength:F0} м < {_p.GnoInterval:F0} м"); }
+        if (prof.Dls1 > _p.Dls1 + 1e-6 && _p.GnoInterval > 0)
+            wr.Warnings.Add($"первый набор {prof.Dls1:0.##}°/{_p.DlsBaseLength:0} м для интервала ГНО");
+    }
+
     /// <summary>Расчёт одной скважины от заданного устья с параметрами профиля pq (ограничения — по общим параметрам).</summary>
     private WellResult BuildWell(Parameters pq, WellTarget tgt, Vec3 wh, string padName, int slot, bool reversed)
     {
@@ -321,6 +331,7 @@ public sealed class Evaluator
         var (hook, tq) = TrajectoryCalculator.TorqueDrag(pq, sv, prof.MdT1);
         double md = _p.LimitsToBottomHole ? prof.MdT3 : prof.MdT1;
         if (md > _p.MaxMD + 1e-6) wr.Violations.Add("MD");
+        GnoCheck(wr, prof);
         if (hook > _p.MaxHookLoad) wr.Violations.Add("крюк");
         if (tq > _p.MaxTorque) wr.Violations.Add("момент");
         wr.MdT1 = prof.MdT1; wr.MdT3 = prof.MdT3; wr.TangentLength = prof.TangentLength;

@@ -76,7 +76,7 @@ public static class Reporting
 
         sb.Clear();
         sb.AppendLine("Вариант;Скважина;UID;Куст;Слот;Устье N;Устье E;T1 N;T1 E;T1 TVD;T3 N;T3 E;T3 TVD;Отход до T1, м;Разворот, °;" +
-            "MD до T1, м;MD до T3, м;ГС, м;Тангенс, м;Зенит тангенса, °;Азимут тангенса, °;Макс. ПИ, °/10м;Нагрузка на крюке, тс;Момент, кН·м;" +
+            "MD до T1, м;MD до T3, м;ГС, м;Тангенс (интервал ГНО), м;Зенит тангенса, °;Азимут тангенса, °;Макс. ПИ, °/10м;Нагрузка на крюке, тс;Момент, кН·м;" +
             "Мин. SF;Сближение при мин. SF, м;Сближение с;Позиция в кусте;KOP, м;Изменение профиля;ННС, тыс.руб;ГС, тыс.руб;Бурение, тыс.руб;Направление ГС;Нарушения;Предупреждения");
         foreach (var v in variants.Where(x => x.SameAs == null))
             foreach (var w in v.Wells)
@@ -126,7 +126,7 @@ public static class Reporting
             }
             j.WriteEndArray();
             j.WriteStartObject("params");
-            j.WriteNumber("MaxOffset", p.MaxOffset); j.WriteNumber("MinOffsetT1", p.MinOffsetT1); j.WriteNumber("MaxMD", p.MaxMD);
+            j.WriteNumber("MaxOffset", p.MaxOffset); j.WriteNumber("MinOffsetT1", p.MinOffsetT1); j.WriteNumber("GnoInterval", p.GnoInterval); j.WriteNumber("MaxMD", p.MaxMD);
             j.WriteNumber("Dls1", p.Dls1); j.WriteNumber("Dls2", p.Dls2); j.WriteNumber("VerticalLength", p.VerticalLength);
             j.WriteBoolean("UseAzimuthTurn", p.UseAzimuthTurn); j.WriteNumber("MaxAzimuthTurn", p.MaxAzimuthTurn);
             j.WriteNumber("MaxHookLoad", p.MaxHookLoad); j.WriteNumber("MaxTorque", p.MaxTorque);
